@@ -1,0 +1,28 @@
+# OS
+.DS_Store
+
+# Node
+node_modules/
+dist/
+build/
+.next/
+.turbo/
+
+# Env and secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+
+# Local runtime state
+.paos/
+data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
