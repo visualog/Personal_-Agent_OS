@@ -122,3 +122,37 @@ export function withUpdatedTask(
     updated_at: updatedAt,
   };
 }
+
+export function withCanceledSteps(steps: readonly Step[]): readonly Step[] {
+  return steps.map((step) => {
+    if (step.status === "completed" || step.status === "failed" || step.status === "skipped") {
+      return step;
+    }
+
+    return {
+      ...step,
+      status: "skipped",
+    };
+  });
+}
+
+export function withCanceledPlan(
+  plan: Plan,
+  steps: readonly Step[],
+  updatedAt: string,
+): Plan {
+  return {
+    ...plan,
+    steps,
+    status: "canceled",
+    updated_at: updatedAt,
+  };
+}
+
+export function withCanceledTask(task: Task, updatedAt: string): Task {
+  return {
+    ...task,
+    status: "canceled",
+    updated_at: updatedAt,
+  };
+}

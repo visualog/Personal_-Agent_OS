@@ -346,3 +346,75 @@ test("resumeApproval with denied resolution persists failed task/plan state and 
   assert.equal(stepStore.get(pendingApproval!.step_id)?.status, "blocked");
   assert.equal(readExecutions, 0);
 });
+
+test("cancelTask expires pending approvals and moves task/plan to canceled without re-running tools", async (t) => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "paos-cancel-task-"));
+  await writeFile(path.join(workspaceRoot, "README.md"), "Personal Agent OS\n");
+  t.after(async () => {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  });
+
+  const taskStore = new InMemoryTaskStore();
+  const planStore = new InMemoryPlanStore();
+  const stepStore = new InMemoryStepStore();
+  const approvalStore = new InMemoryApprovalStore();
+  const gateway = new InMemoryToolGateway();
+  let readExecutions = 0;
+
+  gateway.registerTool({
+    name: "workspace.list_files",
+    description: "List files in the workspace",
+    input_schema: { type: "object" },
+    output_schema: { type: "object" },
+    capabilities: ["workspace.read"],
+    default_risk: "low",
+    requires_approval: false,
+    sandbox: "workspace",
+  }, async () => ({
+    entries: [{ path: "README.md", type: "file" }],
+  }));
+
+  gateway.registerTool(createApprovalStoreToolDefinition({
+    name: "workspace.read_file",
+    capabilities: ["workspace.write"],
+  }), async () => {
+    readExecutions += 1;
+    return { ok: true };
+  });
+
+  const orchestrator = new PersonalAgentOrchestrator({
+    approvalStore,
+    gateway,
+    granted_capabilities: ["workspace.read", "workspace.write"],
+    taskStore,
+    planStore,
+    stepStore,
+  });
+
+  const initial = await orchestrator.run({
+    raw_request: "Inspect the workspace and read the README.",
+    created_by: "user_cancel_task",
+    workspaceRoot,
+  });
+
+  const pendingApproval = initial.approvals[0];
+  assert.ok(pendingApproval);
+  assert.equal(readExecutions, 0);
+
+  const canceled = orchestrator.cancelTask({
+    task: initial.task,
+    plan: initial.plan,
+    reason: "user canceled from approval queue",
+  });
+
+  assert.equal(canceled.task.status, "canceled");
+  assert.equal(canceled.plan.status, "canceled");
+  assert.equal(stepStore.get(pendingApproval!.step_id)?.status, "skipped");
+  assert.equal(
+    canceled.approvals.find((approval) => approval.id === pendingApproval!.id)?.status,
+    "expired",
+  );
+  assert.equal(readExecutions, 0);
+  assert.ok(canceled.events.some((event) => event.event_type === "plan.updated"));
+  assert.ok(canceled.events.some((event) => event.event_type === "task.updated"));
+});

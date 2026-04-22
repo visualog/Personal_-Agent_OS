@@ -425,16 +425,24 @@ class CommandCenterDemoRuntime {
       throw new Error(`Plan not found for approval task: ${approval.task_id}`);
     }
 
-    const resolution = action === 'approve' ? 'approved' : 'denied';
-    const workspaceRoot = await this.workspaceRootPromise;
+    if (action === 'cancel_task') {
+      this.approvalOrchestrator.cancelTask({
+        task,
+        plan,
+        reason: 'Canceled from command center approval queue',
+      });
+    } else {
+      const resolution = action === 'approve' ? 'approved' : 'denied';
+      const workspaceRoot = await this.workspaceRootPromise;
 
-    await this.approvalOrchestrator.resolveApproval({
-      approval_id: approvalId,
-      resolution,
-      task,
-      plan,
-      workspaceRoot,
-    });
+      await this.approvalOrchestrator.resolveApproval({
+        approval_id: approvalId,
+        resolution,
+        task,
+        plan,
+        workspaceRoot,
+      });
+    }
 
     return this.getSnapshot();
   }

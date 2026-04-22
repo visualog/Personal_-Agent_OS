@@ -21,6 +21,9 @@ import {
 } from "./task-intake.js";
 import {
   applyStepResults,
+  withCanceledPlan,
+  withCanceledSteps,
+  withCanceledTask,
   withUpdatedPlan,
   withUpdatedTask,
 } from "./status.js";
@@ -95,6 +98,21 @@ export interface ResolveApprovalResult {
   task?: Task;
   plan?: Plan;
   stepResult?: OrchestratorStepResult;
+  events: readonly Event[];
+  auditRecords: readonly AuditRecord[];
+}
+
+export interface CancelTaskInput {
+  task: Task;
+  plan: Plan;
+  reason: string;
+  now?: string;
+}
+
+export interface CancelTaskResult {
+  task: Task;
+  plan: Plan;
+  approvals: readonly Approval[];
   events: readonly Event[];
   auditRecords: readonly AuditRecord[];
 }
@@ -463,6 +481,40 @@ export class PersonalAgentOrchestrator {
 
   async resumeApproval(input: ResolveApprovalInput): Promise<ResolveApprovalResult> {
     return this.resolveApproval(input);
+  }
+
+  cancelTask(input: CancelTaskInput): CancelTaskResult {
+    const updatedAt = input.now ?? new Date().toISOString();
+
+    for (const approval of this.approvalStore.listByTask(input.task.id)) {
+      if (approval.status === "requested") {
+        this.approvalStore.resolve(approval.id, "expired", updatedAt);
+      }
+    }
+
+    const canceledSteps = withCanceledSteps(input.plan.steps);
+    const canceledPlan = withCanceledPlan(input.plan, canceledSteps, updatedAt);
+    const canceledTask = withCanceledTask(input.task, updatedAt);
+
+    this.publishAndAudit(this.createPlanUpdatedEvent({
+      previousStatus: input.plan.status,
+      plan: canceledPlan,
+    }));
+    this.publishAndAudit(this.createTaskUpdatedEvent({
+      previousStatus: input.task.status,
+      task: canceledTask,
+    }));
+    this.persistTask(canceledTask);
+    this.persistPlan(canceledPlan);
+    this.persistSteps(canceledSteps);
+
+    return {
+      task: canceledTask,
+      plan: canceledPlan,
+      approvals: this.approvalStore.listByTask(input.task.id),
+      events: this.eventBus.getEvents(),
+      auditRecords: this.auditLog.getRecords(),
+    };
   }
 
   private publishAndAudit(event: Event): void {
