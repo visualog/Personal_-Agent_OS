@@ -11,6 +11,7 @@
 - [Tool Runtime](architecture/tool-runtime.md): Tool Registry와 Tool Gateway 런타임 계약
 - [Workspace Tools](architecture/workspace-tools.md): 읽기 전용 workspace 도구 계약
 - [Task Planner Runtime](architecture/task-planner-runtime.md): Task Intake와 Planner 스켈레톤 계약
+- [Orchestrator Runtime](architecture/orchestrator-runtime.md): Task부터 Tool 실행과 Audit까지 묶는 런타임 계약
 - [Policy and Permissions](security/policy-and-permissions.md): 위험도, capability, 승인 정책
 - [Policy Engine Runtime](security/policy-engine-runtime.md): `evaluatePolicy` 입력과 판정 규칙
 - [Memory Privacy](security/memory-privacy.md): 메모리 분류와 민감정보 처리
