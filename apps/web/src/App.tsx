@@ -146,20 +146,14 @@ function ApprovalQueueList({
               </button>
               <div className="approval-actions" aria-label="Approval actions">
                 {item.actions.map((action) => {
-                  const typedAction = action as RuntimeApprovalAction | 'request_changes';
+                  const typedAction = action as RuntimeApprovalAction;
                   return (
                     <button
                       key={action}
                       type="button"
                       className={`action-button action-${typedAction}`}
-                      onClick={() => {
-                        if (typedAction === 'request_changes') {
-                          return;
-                        }
-
-                        onAction(item, typedAction);
-                      }}
-                      disabled={busyApprovalId === item.id || typedAction === 'request_changes'}
+                      onClick={() => onAction(item, typedAction)}
+                      disabled={busyApprovalId === item.id}
                     >
                       {formatActionLabel(action)}
                     </button>
@@ -382,7 +376,11 @@ export default function App() {
       setBannerMessage(
         action === 'approve'
           ? 'Approval resolved through the orchestrator. The blocked step resumed successfully.'
-          : 'Approval resolved through the orchestrator. The blocked step stayed closed.',
+          : action === 'deny'
+            ? 'Approval resolved through the orchestrator. The blocked step stayed closed.'
+            : action === 'cancel_task'
+              ? 'Task canceled through the orchestrator. Pending approval expired and remaining steps were skipped.'
+              : 'Change request recorded. The approval is still pending until the task is revised and reviewed again.',
       );
     } catch (error) {
       setBannerMessage(

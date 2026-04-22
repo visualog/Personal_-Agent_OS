@@ -39,7 +39,12 @@ function commandCenterDemoApiPlugin() {
 
           const rawBody = await readRequestBody(req);
           const body = rawBody ? JSON.parse(rawBody) as { action?: string } : {};
-          if (body.action !== 'approve' && body.action !== 'deny' && body.action !== 'cancel_task') {
+          if (
+            body.action !== 'approve' &&
+            body.action !== 'deny' &&
+            body.action !== 'request_changes' &&
+            body.action !== 'cancel_task'
+          ) {
             res.statusCode = 400;
             res.end(JSON.stringify({ error: 'unsupported action' }));
             return;

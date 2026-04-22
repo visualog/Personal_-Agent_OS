@@ -97,7 +97,14 @@ export type GeneratedCommandCenterState = {
   taskDetails: Record<string, GeneratedTaskDetail>;
 };
 
-export type RuntimeApprovalAction = 'approve' | 'deny' | 'cancel_task';
+export type RuntimeApprovalAction = 'approve' | 'deny' | 'request_changes' | 'cancel_task';
+
+type ApprovalChangeRequest = {
+  approval_id: string;
+  task_id: string;
+  summary: string;
+  requested_at: string;
+};
 
 function createApprovalAwareGateway(): OrchestratorToolGateway {
   return {
@@ -299,6 +306,7 @@ class CommandCenterDemoRuntime {
     auditLog: this.auditLog,
     granted_capabilities: [],
   });
+  private readonly changeRequests = new Map<string, ApprovalChangeRequest[]>();
   private initialized = false;
 
   async init(): Promise<void> {
@@ -339,6 +347,7 @@ class CommandCenterDemoRuntime {
       const detail = this.commandCenter.getTaskDetail(item.task_id);
       const firstPlan = detail.plans[0];
       const runtimeView = this.readModel.getTaskRuntimeView(item.task_id);
+      const changeRequests = this.changeRequests.get(item.task_id) ?? [];
 
       return [
         item.task_id,
@@ -347,7 +356,10 @@ class CommandCenterDemoRuntime {
             id: item.task_id,
             title: item.title,
             status: item.status,
-            summary: summarizeTask(item, detail),
+            summary:
+              changeRequests.length > 0
+                ? `${changeRequests.length} change request note${changeRequests.length > 1 ? 's' : ''} pending before approval.`
+                : summarizeTask(item, detail),
           },
           plan: {
             id: firstPlan?.id ?? `plan_missing_${item.task_id}`,
@@ -361,7 +373,21 @@ class CommandCenterDemoRuntime {
             tool_name: step.tool_name,
             risk_level: step.risk_level,
           })),
-          approvals: detail.approvals.map(mapApproval),
+          approvals: detail.approvals.map((approval) => {
+            const latestChangeRequest = [...changeRequests]
+              .reverse()
+              .find((request) => request.approval_id === approval.id);
+
+            if (!latestChangeRequest) {
+              return mapApproval(approval);
+            }
+
+            return {
+              id: approval.id,
+              status: approval.status,
+              summary: `${approval.summary} | ${latestChangeRequest.summary}`,
+            };
+          }),
           risk_flags: runtimeView.riskFlags.map((event) => ({
             id: event.event_id,
             decision: event.payload.decision,
@@ -369,13 +395,30 @@ class CommandCenterDemoRuntime {
             reason: event.payload.reasons[0] ?? event.payload.decision,
             summary: event.payload.summary,
           })),
-          timeline: detail.timeline.map((event) => ({
-            id: event.event_id,
-            name: event.event_type,
-            timestamp: event.timestamp,
-            summary: summarizeTimelineEvent(event),
-          })),
-          audit_records: detail.audit_records.map(mapAuditRecord),
+          timeline: [
+            ...changeRequests.map((request, index) => ({
+              id: `change_request_${request.approval_id}_${index}`,
+              name: 'step.changes_requested',
+              timestamp: request.requested_at,
+              summary: request.summary,
+            })),
+            ...detail.timeline.map((event) => ({
+              id: event.event_id,
+              name: event.event_type,
+              timestamp: event.timestamp,
+              summary: summarizeTimelineEvent(event),
+            })),
+          ].sort((left, right) => right.timestamp.localeCompare(left.timestamp)),
+          audit_records: [
+            ...changeRequests.map((request, index) => ({
+              id: `audit_change_request_${request.approval_id}_${index}`,
+              action: 'step.changes_requested',
+              channel: 'command-center',
+              summary: request.summary,
+              created_at: request.requested_at,
+            })),
+            ...detail.audit_records.map(mapAuditRecord),
+          ].sort((left, right) => right.created_at.localeCompare(left.created_at)),
         },
       ] as const;
     });
@@ -396,7 +439,7 @@ class CommandCenterDemoRuntime {
         task_id: item.task_id,
         step_id: item.step_id,
         title: item.title,
-        summary: item.summary,
+        summary: this.withLatestChangeRequestSummary(item.task_id, item.approval_id, item.summary),
         risk_level: findRiskLevelForApproval(item, this.commandCenter.getTaskDetail(item.task_id)),
         actions: item.actions,
       })),
@@ -425,7 +468,14 @@ class CommandCenterDemoRuntime {
       throw new Error(`Plan not found for approval task: ${approval.task_id}`);
     }
 
-    if (action === 'cancel_task') {
+    if (action === 'request_changes') {
+      this.appendChangeRequest({
+        approval_id: approvalId,
+        task_id: approval.task_id,
+        summary: 'Changes requested before approval. Update the draft or supporting context and review again.',
+        requested_at: new Date().toISOString(),
+      });
+    } else if (action === 'cancel_task') {
       this.approvalOrchestrator.cancelTask({
         task,
         plan,
@@ -454,6 +504,25 @@ class CommandCenterDemoRuntime {
 
   private getPlanByTaskId(taskId: string): Plan | null {
     return this.planStore.list().find((candidate) => candidate.task_id === taskId) ?? null;
+  }
+
+  private appendChangeRequest(changeRequest: ApprovalChangeRequest): void {
+    const requests = this.changeRequests.get(changeRequest.task_id) ?? [];
+    requests.push(changeRequest);
+    this.changeRequests.set(changeRequest.task_id, requests);
+  }
+
+  private withLatestChangeRequestSummary(taskId: string, approvalId: string, summary: string): string {
+    const latestChangeRequest = (this.changeRequests.get(taskId) ?? [])
+      .slice()
+      .reverse()
+      .find((request) => request.approval_id === approvalId);
+
+    if (!latestChangeRequest) {
+      return summary;
+    }
+
+    return `${summary} | ${latestChangeRequest.summary}`;
   }
 }
 

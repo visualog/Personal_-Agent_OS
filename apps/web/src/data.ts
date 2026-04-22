@@ -81,7 +81,7 @@ export type CommandCenterState = {
   taskDetails: Record<string, TaskDetailView>;
 };
 
-export type RuntimeApprovalAction = 'approve' | 'deny' | 'cancel_task';
+export type RuntimeApprovalAction = 'approve' | 'deny' | 'request_changes' | 'cancel_task';
 
 export const fallbackCommandCenterState: CommandCenterState = {
   taskItems: generatedCommandCenterData.taskItems as TaskItem[],

@@ -104,11 +104,13 @@ task detail은 아래를 한 번에 연결해서 보여줘야 한다.
 
 - `approve`
 - `deny`
+- `request_changes`
+- `cancel_task`
 
 현재 제한:
 
-- `request_changes`는 UI 표현만 있고 실행 경로는 없다.
-- `cancel_task`는 현재 단계에서 deny 경로로 취급된다.
+- `request_changes`는 dev runtime의 review-note layer에서 동작하며, approval 상태는 `requested`로 유지된다.
+- `cancel_task`는 pending approval을 `expired`로 닫고 task/plan을 `canceled`로 전환한다.
 
 ## 6. 수용 기준
 
