@@ -246,9 +246,48 @@ select {
   background: #f8fafc;
 }
 
+.approval-item.selected {
+  border-color: rgba(40, 116, 240, 0.35);
+  background: #f1f6ff;
+}
+
+.approval-select {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
 .action-tag {
   background: #ebf3ff;
   color: #1d4ea6;
+}
+
+.action-button {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid rgba(18, 24, 38, 0.1);
+  border-radius: 999px;
+  background: #ffffff;
+  color: #24344a;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.action-button:hover {
+  border-color: rgba(40, 116, 240, 0.35);
+  background: #eef5ff;
+}
+
+.action-approve {
+  color: #18613e;
+}
+
+.action-deny,
+.action-cancel_task {
+  color: #9b2d2d;
 }
 
 .status-pill {

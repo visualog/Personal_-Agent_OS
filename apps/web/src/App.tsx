@@ -13,6 +13,8 @@ import {
 } from './data';
 import './styles.css';
 
+type ApprovalActionName = 'approve' | 'deny' | 'request_changes' | 'cancel_task';
+
 type DetailSectionProps = {
   title: string;
   children: React.ReactNode;
@@ -25,7 +27,38 @@ const statusLabels: Record<string, string> = {
   blocked: 'Blocked',
   running: 'Running',
   partially_approved: 'Partially Approved',
+  canceled: 'Canceled',
+  approved: 'Approved',
+  denied: 'Denied',
+  requested: 'Requested',
 };
+
+function formatActionLabel(action: string): string {
+  return action.replace('_', ' ');
+}
+
+function createTimelineEvent(name: string, summary: string): TimelineEventView {
+  return {
+    id: `evt_ui_${crypto.randomUUID()}`,
+    name,
+    timestamp: new Date().toISOString(),
+    summary,
+  };
+}
+
+function createAuditRecord(action: string, channel: string, summary: string): AuditRecordView {
+  return {
+    id: `audit_ui_${crypto.randomUUID()}`,
+    action,
+    channel,
+    summary,
+    created_at: new Date().toISOString(),
+  };
+}
+
+function sortTaskItems(items: TaskItem[]): TaskItem[] {
+  return [...items].sort((left, right) => right.updated_at.localeCompare(left.updated_at));
+}
 
 function DetailSection({ title, children }: DetailSectionProps) {
   return (
@@ -86,7 +119,17 @@ function TaskList({
   );
 }
 
-function ApprovalQueueList({ items }: { items: ApprovalQueueItem[] }) {
+function ApprovalQueueList({
+  items,
+  selectedTaskId,
+  onSelect,
+  onAction,
+}: {
+  items: ApprovalQueueItem[];
+  selectedTaskId: string;
+  onSelect: (taskId: string) => void;
+  onAction: (item: ApprovalQueueItem, action: ApprovalActionName) => void;
+}) {
   return (
     <section className="panel approval-panel" aria-label="Approval Queue">
       <div className="panel-heading">
@@ -97,24 +140,45 @@ function ApprovalQueueList({ items }: { items: ApprovalQueueItem[] }) {
         <span className="summary-chip attention">{items.length} waiting</span>
       </div>
       <div className="approval-list" role="list">
-        {items.map((item) => (
-          <article key={item.id} className="approval-item">
-            <div className="approval-header">
-              <strong>{item.title}</strong>
-              <span className={`risk-pill risk-${item.risk_level}`}>
-                {item.risk_level.toUpperCase()}
-              </span>
-            </div>
-            <p>{item.summary}</p>
-            <div className="approval-actions" aria-label="Approval actions">
-              {item.actions.map((action) => (
-                <span key={action} className="action-tag">
-                  {action.replace('_', ' ')}
-                </span>
-              ))}
-            </div>
-          </article>
-        ))}
+        {items.length === 0 ? (
+          <p className="empty-state">No pending approvals in the current runtime snapshot.</p>
+        ) : (
+          items.map((item) => (
+            <article
+              key={item.id}
+              className={`approval-item${selectedTaskId === item.task_id ? ' selected' : ''}`}
+            >
+              <button
+                type="button"
+                className="approval-select"
+                onClick={() => onSelect(item.task_id)}
+              >
+                <div className="approval-header">
+                  <strong>{item.title}</strong>
+                  <span className={`risk-pill risk-${item.risk_level}`}>
+                    {item.risk_level.toUpperCase()}
+                  </span>
+                </div>
+                <p>{item.summary}</p>
+              </button>
+              <div className="approval-actions" aria-label="Approval actions">
+                {item.actions.map((action) => {
+                  const typedAction = action as ApprovalActionName;
+                  return (
+                    <button
+                      key={action}
+                      type="button"
+                      className={`action-button action-${typedAction}`}
+                      onClick={() => onAction(item, typedAction)}
+                    >
+                      {formatActionLabel(action)}
+                    </button>
+                  );
+                })}
+              </div>
+            </article>
+          ))
+        )}
       </div>
     </section>
   );
@@ -202,6 +266,34 @@ function AuditList({ records }: { records: AuditRecordView[] }) {
   );
 }
 
+function ApprovalList({
+  approvals,
+}: {
+  approvals: TaskDetailView['approvals'];
+}) {
+  if (approvals.length === 0) {
+    return <p className="empty-state">No approval history recorded for this task.</p>;
+  }
+
+  return (
+    <div className="data-list" role="list">
+      {approvals.map((approval) => (
+        <article key={approval.id} className="data-row">
+          <div className="data-row-main">
+            <strong>{approval.summary}</strong>
+            <p>{approval.id}</p>
+          </div>
+          <div className="data-row-side">
+            <span className={`status-pill status-${approval.status}`}>
+              {statusLabels[approval.status] ?? approval.status}
+            </span>
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
 function Overview({ detail }: { detail: TaskDetailView }) {
   return (
     <section className="overview-band" aria-label="Task Overview">
@@ -233,16 +325,186 @@ function Overview({ detail }: { detail: TaskDetailView }) {
 }
 
 export default function App() {
+  const [taskItemsState, setTaskItemsState] = useState(() => sortTaskItems(taskItems));
+  const [approvalQueueState, setApprovalQueueState] = useState(() => [...approvalQueue]);
+  const [taskDetailsState, setTaskDetailsState] = useState(() => ({ ...taskDetails }));
   const [selectedTaskId, setSelectedTaskId] = useState(() => taskItems[0]?.id ?? '');
 
   const selectedDetail = useMemo(() => {
-    if (selectedTaskId && taskDetails[selectedTaskId]) {
-      return taskDetails[selectedTaskId];
+    if (selectedTaskId && taskDetailsState[selectedTaskId]) {
+      return taskDetailsState[selectedTaskId];
     }
 
-    const fallbackTaskId = taskItems[0]?.id;
-    return fallbackTaskId ? taskDetails[fallbackTaskId] : undefined;
-  }, [selectedTaskId]);
+    const fallbackTaskId = taskItemsState[0]?.id;
+    return fallbackTaskId ? taskDetailsState[fallbackTaskId] : undefined;
+  }, [selectedTaskId, taskDetailsState, taskItemsState]);
+
+  const handleApprovalAction = (item: ApprovalQueueItem, action: ApprovalActionName) => {
+    setSelectedTaskId(item.task_id);
+
+    setTaskDetailsState((currentDetails) => {
+      const detail = currentDetails[item.task_id];
+      if (!detail) {
+        return currentDetails;
+      }
+
+      const existingApproval = detail.approvals.find((approval) => approval.id === item.id);
+      if (!existingApproval) {
+        return currentDetails;
+      }
+
+      let nextDetail: TaskDetailView = detail;
+      let nextTaskStatus = detail.task.status;
+      let nextPlanStatus = detail.plan.status;
+      let nextTaskSummary = detail.task.summary;
+      let shouldRemoveApproval = false;
+
+      if (action === 'approve') {
+        nextTaskStatus = 'completed';
+        nextPlanStatus = 'completed';
+        nextTaskSummary = 'Approval granted and the blocked runtime step was resumed in the demo state.';
+        shouldRemoveApproval = true;
+        nextDetail = {
+          ...detail,
+          task: { ...detail.task, status: nextTaskStatus, summary: nextTaskSummary },
+          plan: { ...detail.plan, status: nextPlanStatus },
+          steps: detail.steps.map((step) =>
+            step.id === item.step_id ? { ...step, status: 'completed' } : step,
+          ),
+          approvals: detail.approvals.map((approval) =>
+            approval.id === item.id
+              ? { ...approval, status: 'approved', summary: `${approval.summary} 승인됨` }
+              : approval,
+          ),
+          timeline: [
+            createTimelineEvent('step.approved', `${item.summary} 승인됨`),
+            createTimelineEvent('action.succeeded', 'Approved step resumed successfully in the demo runtime'),
+            createTimelineEvent('plan.updated', 'plan status changed to completed'),
+            createTimelineEvent('task.updated', 'task status changed to completed'),
+            ...detail.timeline,
+          ],
+          audit_records: [
+            createAuditRecord('step.approved', 'command-center', `${item.summary} 승인됨`),
+            createAuditRecord('action.succeeded', 'command-center', 'Approved step resumed successfully in the demo runtime'),
+            createAuditRecord('task.updated', 'command-center', 'Task moved to completed after approval'),
+            ...detail.audit_records,
+          ],
+        };
+      } else if (action === 'deny') {
+        nextTaskStatus = 'failed';
+        nextPlanStatus = 'failed';
+        nextTaskSummary = 'Approval denied and the blocked runtime step stayed blocked.';
+        shouldRemoveApproval = true;
+        nextDetail = {
+          ...detail,
+          task: { ...detail.task, status: nextTaskStatus, summary: nextTaskSummary },
+          plan: { ...detail.plan, status: nextPlanStatus },
+          steps: detail.steps.map((step) =>
+            step.id === item.step_id ? { ...step, status: 'blocked' } : step,
+          ),
+          approvals: detail.approvals.map((approval) =>
+            approval.id === item.id
+              ? { ...approval, status: 'denied', summary: `${approval.summary} 거절됨` }
+              : approval,
+          ),
+          timeline: [
+            createTimelineEvent('step.denied', `${item.summary} 거절됨`),
+            createTimelineEvent('plan.updated', 'plan status changed to failed'),
+            createTimelineEvent('task.updated', 'task status changed to failed'),
+            ...detail.timeline,
+          ],
+          audit_records: [
+            createAuditRecord('step.denied', 'command-center', `${item.summary} 거절됨`),
+            createAuditRecord('task.updated', 'command-center', 'Task moved to failed after denial'),
+            ...detail.audit_records,
+          ],
+        };
+      } else if (action === 'request_changes') {
+        nextTaskSummary = 'Reviewer asked for changes before deciding on this approval.';
+        nextDetail = {
+          ...detail,
+          task: { ...detail.task, summary: nextTaskSummary },
+          approvals: detail.approvals.map((approval) =>
+            approval.id === item.id
+              ? { ...approval, summary: `${approval.summary} 변경 요청됨` }
+              : approval,
+          ),
+          timeline: [
+            createTimelineEvent('step.approval_requested', 'Changes requested before approval decision'),
+            ...detail.timeline,
+          ],
+          audit_records: [
+            createAuditRecord('step.approval_requested', 'command-center', 'Changes requested before approval decision'),
+            ...detail.audit_records,
+          ],
+        };
+      } else if (action === 'cancel_task') {
+        nextTaskStatus = 'canceled';
+        nextPlanStatus = 'canceled';
+        nextTaskSummary = 'Task canceled from the approval queue before any risky action resumed.';
+        shouldRemoveApproval = true;
+        nextDetail = {
+          ...detail,
+          task: { ...detail.task, status: nextTaskStatus, summary: nextTaskSummary },
+          plan: { ...detail.plan, status: nextPlanStatus },
+          steps: detail.steps.map((step) =>
+            step.id === item.step_id ? { ...step, status: 'skipped' } : step,
+          ),
+          approvals: detail.approvals.map((approval) =>
+            approval.id === item.id
+              ? { ...approval, status: 'denied', summary: 'Task canceled from approval queue' }
+              : approval,
+          ),
+          timeline: [
+            createTimelineEvent('task.updated', 'task status changed to canceled'),
+            createTimelineEvent('plan.updated', 'plan status changed to canceled'),
+            ...detail.timeline,
+          ],
+          audit_records: [
+            createAuditRecord('task.updated', 'command-center', 'Task canceled from approval queue'),
+            ...detail.audit_records,
+          ],
+        };
+      }
+
+      const nextPendingApprovalCount = shouldRemoveApproval
+        ? Math.max(0, detail.approvals.filter((approval) => approval.status === 'requested').length - 1)
+        : nextDetail.approvals.filter((approval) => approval.status === 'requested').length;
+
+      setTaskItemsState((currentItems) =>
+        sortTaskItems(
+          currentItems.map((task) =>
+            task.id === item.task_id
+              ? {
+                  ...task,
+                  status: nextTaskStatus,
+                  summary: nextTaskSummary,
+                  pending_approval_count: nextPendingApprovalCount,
+                  updated_at: new Date().toISOString(),
+                }
+              : task,
+          ),
+        ),
+      );
+
+      if (shouldRemoveApproval) {
+        setApprovalQueueState((currentQueue) => currentQueue.filter((entry) => entry.id !== item.id));
+      } else if (action === 'request_changes') {
+        setApprovalQueueState((currentQueue) =>
+          currentQueue.map((entry) =>
+            entry.id === item.id
+              ? { ...entry, summary: 'Changes requested before approval decision' }
+              : entry,
+          ),
+        );
+      }
+
+      return {
+        ...currentDetails,
+        [item.task_id]: nextDetail,
+      };
+    });
+  };
 
   if (!selectedDetail) {
     return (
@@ -267,8 +529,13 @@ export default function App() {
 
         <div className="layout-grid">
           <div className="sidebar-column">
-            <TaskList items={taskItems} selectedTaskId={selectedTaskId} onSelect={setSelectedTaskId} />
-            <ApprovalQueueList items={approvalQueue} />
+            <TaskList items={taskItemsState} selectedTaskId={selectedTaskId} onSelect={setSelectedTaskId} />
+            <ApprovalQueueList
+              items={approvalQueueState}
+              selectedTaskId={selectedTaskId}
+              onSelect={setSelectedTaskId}
+              onAction={handleApprovalAction}
+            />
           </div>
 
           <div className="content-column">
@@ -284,6 +551,10 @@ export default function App() {
                 </div>
               </div>
               <StepsTable steps={selectedDetail.steps} />
+            </DetailSection>
+
+            <DetailSection title="Approvals">
+              <ApprovalList approvals={selectedDetail.approvals} />
             </DetailSection>
 
             <DetailSection title="Risk Flags">
