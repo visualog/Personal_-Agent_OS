@@ -4,3 +4,5 @@ export * from "./event-bus.js";
 export * from "./audit-log.js";
 export * from "./policy.js";
 export * from "./policy-engine.js";
+export * from "./tool-registry.js";
+export * from "./tool-gateway.js";
