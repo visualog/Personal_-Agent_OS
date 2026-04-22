@@ -20,6 +20,7 @@
 - [Memory API Runtime](security/memory-api-runtime.md): 메모리 write/search/delete 최소 런타임 계약
 - [Runtime Control](security/runtime-control.md): 긴급 정지와 capability 권한 회수 계약
 - [MVP Backlog](issues/mvp-backlog.md): GitHub Issue로 옮길 작업 목록
+- [E2E Scenarios](issues/e2e-scenarios.md): 현재 구현 기준 대표 end-to-end 회귀 시나리오
 - [Issue Template](issues/issue-template.md): 이슈 작성 템플릿
 
 ## 문서 작성 원칙
