@@ -72,7 +72,7 @@ Personal Agent OS의 모든 중요한 상태 변경은 이벤트로 기록한다
 | `action.succeeded` | Executor | Tool action 성공 |
 | `action.failed` | Executor | Tool action 실패 |
 | `policy.evaluated` | Policy Engine | 정책 판정 완료 |
-| `risk.flagged` | Policy Engine | high/critical 위험 감지 |
+| `risk.flagged` | Policy Engine | `require_approval` 또는 `deny`로 판정된 위험 신호 기록 |
 | `memory.read` | Memory Store | 메모리 조회 |
 | `memory.written` | Memory Store | 메모리 저장 |
 | `audit.recorded` | Audit Log | 감사 로그 기록 완료 |
@@ -127,7 +127,8 @@ Personal Agent OS의 모든 중요한 상태 변경은 이벤트로 기록한다
   "decision": "allow | require_approval | deny",
   "risk_level": "low | medium | high | critical",
   "required_capabilities": ["filesystem.read"],
-  "reasons": ["workspace_scope_allowed"]
+  "reasons": ["workspace_scope_allowed"],
+  "deny_reasons": []
 }
 ```
 
@@ -135,6 +136,29 @@ Personal Agent OS의 모든 중요한 상태 변경은 이벤트로 기록한다
 
 - 모든 Tool 실행 전 반드시 발행한다.
 - `decision=deny`인 경우 Executor는 실행하지 않는다.
+
+### `risk.flagged`
+
+```json
+{
+  "policy_decision_id": "string",
+  "step_id": "string",
+  "tool_name": "workspace.read_file",
+  "decision": "require_approval | deny",
+  "risk_level": "low | medium | high | critical",
+  "required_capabilities": ["workspace.write"],
+  "reasons": ["medium risk capability requires approval"],
+  "deny_reasons": [],
+  "summary": "workspace.read_file requires approval"
+}
+```
+
+수용 기준:
+
+- `policy.evaluated` 직후에만 발행한다.
+- `decision=allow`인 경우에는 발행하지 않는다.
+- `policy_decision_id`로 같은 정책 판정과 연결 가능해야 한다.
+- 사용자 승인 대기와 정책 거절은 모두 별도 risk signal로 필터링 가능해야 한다.
 
 ### `step.approval_requested`
 

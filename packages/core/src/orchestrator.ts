@@ -120,6 +120,8 @@ function summarizeEvent(event: Event): string {
       return `approval denied: ${event.payload.approval_id}`;
     case "policy.evaluated":
       return `policy evaluated: ${event.payload.decision}`;
+    case "risk.flagged":
+      return `risk flagged: ${event.payload.decision}`;
     case "action.started":
       return `action started: ${event.payload.tool_name}`;
     case "action.succeeded":
@@ -229,11 +231,20 @@ export class PersonalAgentOrchestrator {
         sandbox_matched: true,
       });
       if ("policy" in execution && execution.policy) {
-        this.publishAndAudit(this.createPolicyEvaluatedEvent({
+        const policyEvent = this.createPolicyEvaluatedEvent({
           taskId: taskResult.task.id,
           step,
           policy: execution.policy,
-        }));
+        });
+        this.publishAndAudit(policyEvent);
+        const riskEvent = this.createRiskFlaggedEvent({
+          taskId: taskResult.task.id,
+          step,
+          policyEvent,
+        });
+        if (riskEvent) {
+          this.publishAndAudit(riskEvent);
+        }
       }
 
       if (execution.status === "succeeded" && step.tool_name === "workspace.list_files") {
@@ -506,11 +517,20 @@ export class PersonalAgentOrchestrator {
       sandbox_matched: true,
     });
     if ("policy" in execution && execution.policy) {
-      this.publishAndAudit(this.createPolicyEvaluatedEvent({
+      const policyEvent = this.createPolicyEvaluatedEvent({
         taskId,
         step,
         policy: execution.policy,
-      }));
+      });
+      this.publishAndAudit(policyEvent);
+      const riskEvent = this.createRiskFlaggedEvent({
+        taskId,
+        step,
+        policyEvent,
+      });
+      if (riskEvent) {
+        this.publishAndAudit(riskEvent);
+      }
     }
 
     const finishedEvent =
@@ -605,7 +625,7 @@ export class PersonalAgentOrchestrator {
     taskId: string;
     step: Step;
     policy: NonNullable<Extract<ToolExecutionResult, { policy: unknown }>["policy"]>;
-  }): Event {
+  }): Extract<Event, { event_type: "policy.evaluated" }> {
     return {
       event_id: `evt_${randomUUID()}`,
       event_type: "policy.evaluated",
@@ -621,6 +641,49 @@ export class PersonalAgentOrchestrator {
         risk_level: policy.risk_level,
         required_capabilities: [...step.required_capabilities],
         reasons: [...policy.reasons],
+        deny_reasons: [...policy.deny_reasons],
+      },
+    };
+  }
+
+  private createRiskFlaggedEvent({
+    taskId,
+    step,
+    policyEvent,
+  }: {
+    taskId: string;
+    step: Step;
+    policyEvent: Extract<Event, { event_type: "policy.evaluated" }>;
+  }): Event | null {
+    if (
+      policyEvent.payload.decision !== "require_approval" &&
+      policyEvent.payload.decision !== "deny"
+    ) {
+      return null;
+    }
+
+    const summary =
+      policyEvent.payload.decision === "require_approval"
+        ? `${step.tool_name} requires approval`
+        : `${step.tool_name} denied by policy`;
+
+    return {
+      event_id: `evt_${randomUUID()}`,
+      event_type: "risk.flagged",
+      timestamp: new Date().toISOString(),
+      actor: "system",
+      task_id: taskId,
+      trace_id: `trace_${randomUUID()}`,
+      payload: {
+        policy_decision_id: policyEvent.payload.policy_decision_id,
+        step_id: step.id,
+        tool_name: step.tool_name,
+        decision: policyEvent.payload.decision,
+        risk_level: policyEvent.payload.risk_level,
+        required_capabilities: [...policyEvent.payload.required_capabilities],
+        reasons: [...policyEvent.payload.reasons],
+        deny_reasons: [...policyEvent.payload.deny_reasons],
+        summary,
       },
     };
   }

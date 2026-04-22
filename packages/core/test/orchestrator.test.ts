@@ -38,6 +38,10 @@ function getEventIndexes(events: readonly Event[], eventType: string): number[] 
   }, []);
 }
 
+function isRiskFlaggedEvent(event: Event): event is Extract<Event, { event_type: "risk.flagged" }> {
+  return event.event_type === "risk.flagged";
+}
+
 test("run creates task and plan and executes workspace list/read successfully", async (t) => {
   const workspaceRoot = await createTempWorkspace();
   t.after(async () => {
@@ -89,6 +93,7 @@ test("event stream includes task.created, plan.drafted, action.started, action.s
   assert.ok(eventTypes.includes("action.succeeded"));
   assert.ok(eventTypes.includes("plan.updated"));
   assert.ok(eventTypes.includes("task.updated"));
+  assert.ok(!eventTypes.includes("risk.flagged"));
 });
 
 test("run emits lifecycle projection events in a sane order before closing with plan/task updates", async (t) => {
@@ -179,6 +184,9 @@ test("with granted_capabilities [] the run produces at least one denied/failed e
   assert.ok(
     !result.steps.every(({ execution }) => execution.status === "succeeded"),
   );
+  const riskEvents = result.events.filter(isRiskFlaggedEvent);
+  assert.ok(riskEvents.length > 0);
+  assert.ok(riskEvents.every((event) => event.payload.decision === "deny"));
 });
 
 function createApprovalAwareGateway(): OrchestratorToolGateway & { getExecutions(): readonly string[] } {
@@ -428,6 +436,7 @@ test("resumeApproval emits step.approved, step.ready, policy.evaluated, and fina
   assert.ok(resumeEvents.some((event) => event.event_type === "action.succeeded"));
   assert.equal(getEventIndexes(resumeEvents, "step.ready").length, 1);
   assert.equal(getEventIndexes(resumeEvents, "policy.evaluated").length, 1);
+  assert.equal(getEventIndexes(resumeEvents, "risk.flagged").length, 0);
   assert.equal(getEventIndexes(resumeEvents, "plan.updated").length, 1);
   assert.equal(getEventIndexes(resumeEvents, "task.updated").length, 1);
 
@@ -472,6 +481,9 @@ test("run with approval pending marks task waiting_approval, plan partially_appr
   assert.ok(initial.events.some((event) => event.event_type === "plan.updated"));
   assert.ok(initial.events.filter((event) => event.event_type === "step.ready").length >= 2);
   assert.ok(initial.events.some((event) => event.event_type === "policy.evaluated"));
+  const flaggedEvents = initial.events.filter(isRiskFlaggedEvent);
+  assert.equal(flaggedEvents.length, 1);
+  assert.equal(flaggedEvents[0]?.payload.decision, "require_approval");
   assert.deepEqual(
     initial.plan.steps.map((step) => step.status),
     ["completed", "waiting_approval"],
@@ -500,12 +512,53 @@ test("run with approval pending marks task waiting_approval, plan partially_appr
   assert.ok(resumed.events.some((event) => event.event_type === "task.updated"));
   assert.ok(resumed.events.some((event) => event.event_type === "plan.updated"));
   assert.equal(
+    resumed.events
+      .slice(initial.events.length)
+      .filter(isRiskFlaggedEvent).length,
+    0,
+  );
+  assert.equal(
     resumed.plan?.steps.find((step) => step.id === pendingApproval.step_id)?.status,
     "completed",
   );
   assert.equal(resumed.stepResult?.execution.status, "succeeded");
   assert.equal(initial.task.status, "waiting_approval");
   assert.equal(initial.plan.status, "partially_approved");
+});
+
+test("risk.flagged follows policy.evaluated for non-allow decisions and carries decision metadata", async (t) => {
+  const workspaceRoot = await createTempWorkspace();
+  t.after(async () => {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  });
+
+  const gateway = createApprovalAwareGateway();
+  const orchestrator = new PersonalAgentOrchestrator({
+    granted_capabilities: ["workspace.read", "workspace.write"],
+    gateway,
+  });
+
+  const result = await orchestrator.run({
+    raw_request: "Inspect the workspace and read the README.",
+    created_by: "user_risk_event_contract",
+    workspaceRoot,
+  });
+
+  const policyIndexes = getEventIndexes(result.events, "policy.evaluated");
+  const flaggedIndexes = getEventIndexes(result.events, "risk.flagged");
+
+  assert.equal(flaggedIndexes.length, 1);
+  assert.ok(flaggedIndexes[0]! > policyIndexes[0]!);
+
+  const flagged = result.events[flaggedIndexes[0]!]!;
+  if (flagged.event_type !== "risk.flagged") {
+    throw new Error("expected risk.flagged event");
+  }
+  assert.equal(flagged.payload.decision, "require_approval");
+  assert.equal(flagged.payload.tool_name, "workspace.read_file");
+  assert.ok(Array.isArray(flagged.payload.reasons));
+  assert.ok(Array.isArray(flagged.payload.deny_reasons));
+  assert.equal(typeof flagged.payload.summary, "string");
 });
 
 test("run persists created task, drafted plan, stored steps, and final completed states when taskStore/planStore/stepStore are injected", async (t) => {

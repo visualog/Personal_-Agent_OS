@@ -58,9 +58,13 @@ test("domain and event contracts compose for a read-only step", () => {
       risk_level: step.risk_level,
       required_capabilities: [...step.required_capabilities],
       reasons: ["workspace_scope_allowed"],
+      deny_reasons: [],
     },
   };
 
+  if (event.event_type !== "policy.evaluated") {
+    throw new Error("expected policy.evaluated event");
+  }
+
   assert.equal(event.payload.decision, "allow");
 });
-

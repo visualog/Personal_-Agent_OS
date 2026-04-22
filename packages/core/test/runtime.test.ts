@@ -28,6 +28,7 @@ function createEvent(overrides: Partial<PolicyEvaluatedEvent> = {}): PolicyEvalu
       risk_level: "low",
       required_capabilities: ["workspace.read"],
       reasons: ["workspace_scope_allowed"],
+      deny_reasons: [],
     },
     ...overrides,
   };

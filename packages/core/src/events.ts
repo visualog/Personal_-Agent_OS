@@ -129,8 +129,19 @@ export type EventPayloadMap = {
     risk_level: "low" | "medium" | "high" | "critical";
     required_capabilities: string[];
     reasons: string[];
+    deny_reasons: string[];
   };
-  "risk.flagged": Record<string, unknown>;
+  "risk.flagged": {
+    policy_decision_id: string;
+    step_id: string;
+    tool_name: string;
+    decision: "require_approval" | "deny";
+    risk_level: "low" | "medium" | "high" | "critical";
+    required_capabilities: string[];
+    reasons: string[];
+    deny_reasons: string[];
+    summary: string;
+  };
   "memory.read": Record<string, unknown>;
   "memory.written": {
     memory_id: string;
