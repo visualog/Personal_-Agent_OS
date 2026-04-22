@@ -12,6 +12,7 @@
 - [Workspace Tools](architecture/workspace-tools.md): 읽기 전용 workspace 도구 계약
 - [Task Planner Runtime](architecture/task-planner-runtime.md): Task Intake와 Planner 스켈레톤 계약
 - [Orchestrator Runtime](architecture/orchestrator-runtime.md): Task부터 Tool 실행과 Audit까지 묶는 런타임 계약
+- [Runtime Read Model](architecture/read-model.md): task 기준 상태/승인/위험/이벤트 조회 계약
 - [Policy and Permissions](security/policy-and-permissions.md): 위험도, capability, 승인 정책
 - [Policy Engine Runtime](security/policy-engine-runtime.md): `evaluatePolicy` 입력과 판정 규칙
 - [Approval Flow Runtime](security/approval-flow-runtime.md): 승인 요청 저장과 상태 전이 계약
