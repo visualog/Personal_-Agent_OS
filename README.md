@@ -21,6 +21,13 @@ The repository now also includes a first runnable web prototype at `apps/web` th
 
 This UI is fed by a runtime-backed demo snapshot generated from the core orchestrator before `dev:web` and `build:web`, so the browser reflects real command-center state shapes rather than hand-written mock objects.
 
+When the Vite dev server is running, the preview also exposes a thin local API for:
+
+- `GET /api/command-center/state`
+- `POST /api/command-center/approvals/:id`
+
+That means the approval queue in local preview now runs through the actual orchestrator approval flow for `approve` and `deny`.
+
 ## Repository Layout
 
 - `apps/`: runnable applications

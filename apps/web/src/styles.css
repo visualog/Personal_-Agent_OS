@@ -124,6 +124,10 @@ select {
   background: rgba(255, 255, 255, 0.92);
 }
 
+.runtime-banner {
+  margin-bottom: 20px;
+}
+
 .panel-heading,
 .section-heading {
   display: flex;
@@ -274,6 +278,11 @@ select {
   color: #24344a;
   cursor: pointer;
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.action-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
 }
 
 .action-button:hover {

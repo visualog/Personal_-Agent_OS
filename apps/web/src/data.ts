@@ -18,7 +18,7 @@ export type ApprovalQueueItem = {
   title: string;
   summary: string;
   risk_level: string;
-  actions: readonly string[];
+  actions: readonly ('approve' | 'deny' | 'request_changes' | 'cancel_task')[];
 };
 
 export type TimelineEventView = {
@@ -75,6 +75,44 @@ export type TaskDetailView = {
   audit_records: AuditRecordView[];
 };
 
-export const taskItems = generatedCommandCenterData.taskItems as TaskItem[];
-export const approvalQueue = generatedCommandCenterData.approvalQueue as ApprovalQueueItem[];
-export const taskDetails = generatedCommandCenterData.taskDetails as Record<string, TaskDetailView>;
+export type CommandCenterState = {
+  taskItems: TaskItem[];
+  approvalQueue: ApprovalQueueItem[];
+  taskDetails: Record<string, TaskDetailView>;
+};
+
+export type RuntimeApprovalAction = 'approve' | 'deny' | 'cancel_task';
+
+export const fallbackCommandCenterState: CommandCenterState = {
+  taskItems: generatedCommandCenterData.taskItems as TaskItem[],
+  approvalQueue: generatedCommandCenterData.approvalQueue as ApprovalQueueItem[],
+  taskDetails: generatedCommandCenterData.taskDetails as Record<string, TaskDetailView>,
+};
+
+export async function fetchCommandCenterState(): Promise<CommandCenterState> {
+  const response = await fetch('/api/command-center/state');
+  if (!response.ok) {
+    throw new Error(`Failed to fetch command center state: ${response.status}`);
+  }
+
+  return response.json() as Promise<CommandCenterState>;
+}
+
+export async function resolveApprovalAction(
+  approvalId: string,
+  action: RuntimeApprovalAction,
+): Promise<CommandCenterState> {
+  const response = await fetch(`/api/command-center/approvals/${approvalId}`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ action }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to resolve approval action: ${response.status}`);
+  }
+
+  return response.json() as Promise<CommandCenterState>;
+}

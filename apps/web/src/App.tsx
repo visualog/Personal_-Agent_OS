@@ -1,19 +1,19 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
-  approvalQueue,
-  taskDetails,
-  taskItems,
+  fallbackCommandCenterState,
+  fetchCommandCenterState,
+  resolveApprovalAction,
   type ApprovalQueueItem,
   type AuditRecordView,
+  type CommandCenterState,
   type RiskFlagView,
+  type RuntimeApprovalAction,
   type StepView,
   type TaskDetailView,
   type TaskItem,
   type TimelineEventView,
 } from './data';
 import './styles.css';
-
-type ApprovalActionName = 'approve' | 'deny' | 'request_changes' | 'cancel_task';
 
 type DetailSectionProps = {
   title: string;
@@ -35,25 +35,6 @@ const statusLabels: Record<string, string> = {
 
 function formatActionLabel(action: string): string {
   return action.replace('_', ' ');
-}
-
-function createTimelineEvent(name: string, summary: string): TimelineEventView {
-  return {
-    id: `evt_ui_${crypto.randomUUID()}`,
-    name,
-    timestamp: new Date().toISOString(),
-    summary,
-  };
-}
-
-function createAuditRecord(action: string, channel: string, summary: string): AuditRecordView {
-  return {
-    id: `audit_ui_${crypto.randomUUID()}`,
-    action,
-    channel,
-    summary,
-    created_at: new Date().toISOString(),
-  };
 }
 
 function sortTaskItems(items: TaskItem[]): TaskItem[] {
@@ -124,11 +105,13 @@ function ApprovalQueueList({
   selectedTaskId,
   onSelect,
   onAction,
+  busyApprovalId,
 }: {
   items: ApprovalQueueItem[];
   selectedTaskId: string;
   onSelect: (taskId: string) => void;
-  onAction: (item: ApprovalQueueItem, action: ApprovalActionName) => void;
+  onAction: (item: ApprovalQueueItem, action: RuntimeApprovalAction) => void;
+  busyApprovalId: string | null;
 }) {
   return (
     <section className="panel approval-panel" aria-label="Approval Queue">
@@ -163,13 +146,20 @@ function ApprovalQueueList({
               </button>
               <div className="approval-actions" aria-label="Approval actions">
                 {item.actions.map((action) => {
-                  const typedAction = action as ApprovalActionName;
+                  const typedAction = action as RuntimeApprovalAction | 'request_changes';
                   return (
                     <button
                       key={action}
                       type="button"
                       className={`action-button action-${typedAction}`}
-                      onClick={() => onAction(item, typedAction)}
+                      onClick={() => {
+                        if (typedAction === 'request_changes') {
+                          return;
+                        }
+
+                        onAction(item, typedAction);
+                      }}
+                      disabled={busyApprovalId === item.id || typedAction === 'request_changes'}
                     >
                       {formatActionLabel(action)}
                     </button>
@@ -325,185 +315,84 @@ function Overview({ detail }: { detail: TaskDetailView }) {
 }
 
 export default function App() {
-  const [taskItemsState, setTaskItemsState] = useState(() => sortTaskItems(taskItems));
-  const [approvalQueueState, setApprovalQueueState] = useState(() => [...approvalQueue]);
-  const [taskDetailsState, setTaskDetailsState] = useState(() => ({ ...taskDetails }));
-  const [selectedTaskId, setSelectedTaskId] = useState(() => taskItems[0]?.id ?? '');
+  const [commandCenterState, setCommandCenterState] = useState<CommandCenterState>({
+    taskItems: sortTaskItems(fallbackCommandCenterState.taskItems),
+    approvalQueue: [...fallbackCommandCenterState.approvalQueue],
+    taskDetails: { ...fallbackCommandCenterState.taskDetails },
+  });
+  const [selectedTaskId, setSelectedTaskId] = useState(() => fallbackCommandCenterState.taskItems[0]?.id ?? '');
+  const [busyApprovalId, setBusyApprovalId] = useState<string | null>(null);
+  const [runtimeMode, setRuntimeMode] = useState<'api' | 'snapshot'>('snapshot');
+  const [bannerMessage, setBannerMessage] = useState('Live API not connected yet. Showing generated runtime snapshot.');
+
+  useEffect(() => {
+    let active = true;
+
+    void (async () => {
+      try {
+        const state = await fetchCommandCenterState();
+        if (!active) {
+          return;
+        }
+
+        setCommandCenterState({
+          taskItems: sortTaskItems(state.taskItems),
+          approvalQueue: state.approvalQueue,
+          taskDetails: state.taskDetails,
+        });
+        setSelectedTaskId((current) => current || state.taskItems[0]?.id || '');
+        setRuntimeMode('api');
+        setBannerMessage('Live dev runtime connected. Approval actions now use the orchestrator flow.');
+      } catch {
+        if (!active) {
+          return;
+        }
+
+        setRuntimeMode('snapshot');
+        setBannerMessage('API unavailable, so the screen is using the generated runtime snapshot.');
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const selectedDetail = useMemo(() => {
-    if (selectedTaskId && taskDetailsState[selectedTaskId]) {
-      return taskDetailsState[selectedTaskId];
+    if (selectedTaskId && commandCenterState.taskDetails[selectedTaskId]) {
+      return commandCenterState.taskDetails[selectedTaskId];
     }
 
-    const fallbackTaskId = taskItemsState[0]?.id;
-    return fallbackTaskId ? taskDetailsState[fallbackTaskId] : undefined;
-  }, [selectedTaskId, taskDetailsState, taskItemsState]);
+    const fallbackTaskId = commandCenterState.taskItems[0]?.id;
+    return fallbackTaskId ? commandCenterState.taskDetails[fallbackTaskId] : undefined;
+  }, [selectedTaskId, commandCenterState]);
 
-  const handleApprovalAction = (item: ApprovalQueueItem, action: ApprovalActionName) => {
+  const handleApprovalAction = async (item: ApprovalQueueItem, action: RuntimeApprovalAction) => {
     setSelectedTaskId(item.task_id);
+    setBusyApprovalId(item.id);
 
-    setTaskDetailsState((currentDetails) => {
-      const detail = currentDetails[item.task_id];
-      if (!detail) {
-        return currentDetails;
-      }
-
-      const existingApproval = detail.approvals.find((approval) => approval.id === item.id);
-      if (!existingApproval) {
-        return currentDetails;
-      }
-
-      let nextDetail: TaskDetailView = detail;
-      let nextTaskStatus = detail.task.status;
-      let nextPlanStatus = detail.plan.status;
-      let nextTaskSummary = detail.task.summary;
-      let shouldRemoveApproval = false;
-
-      if (action === 'approve') {
-        nextTaskStatus = 'completed';
-        nextPlanStatus = 'completed';
-        nextTaskSummary = 'Approval granted and the blocked runtime step was resumed in the demo state.';
-        shouldRemoveApproval = true;
-        nextDetail = {
-          ...detail,
-          task: { ...detail.task, status: nextTaskStatus, summary: nextTaskSummary },
-          plan: { ...detail.plan, status: nextPlanStatus },
-          steps: detail.steps.map((step) =>
-            step.id === item.step_id ? { ...step, status: 'completed' } : step,
-          ),
-          approvals: detail.approvals.map((approval) =>
-            approval.id === item.id
-              ? { ...approval, status: 'approved', summary: `${approval.summary} 승인됨` }
-              : approval,
-          ),
-          timeline: [
-            createTimelineEvent('step.approved', `${item.summary} 승인됨`),
-            createTimelineEvent('action.succeeded', 'Approved step resumed successfully in the demo runtime'),
-            createTimelineEvent('plan.updated', 'plan status changed to completed'),
-            createTimelineEvent('task.updated', 'task status changed to completed'),
-            ...detail.timeline,
-          ],
-          audit_records: [
-            createAuditRecord('step.approved', 'command-center', `${item.summary} 승인됨`),
-            createAuditRecord('action.succeeded', 'command-center', 'Approved step resumed successfully in the demo runtime'),
-            createAuditRecord('task.updated', 'command-center', 'Task moved to completed after approval'),
-            ...detail.audit_records,
-          ],
-        };
-      } else if (action === 'deny') {
-        nextTaskStatus = 'failed';
-        nextPlanStatus = 'failed';
-        nextTaskSummary = 'Approval denied and the blocked runtime step stayed blocked.';
-        shouldRemoveApproval = true;
-        nextDetail = {
-          ...detail,
-          task: { ...detail.task, status: nextTaskStatus, summary: nextTaskSummary },
-          plan: { ...detail.plan, status: nextPlanStatus },
-          steps: detail.steps.map((step) =>
-            step.id === item.step_id ? { ...step, status: 'blocked' } : step,
-          ),
-          approvals: detail.approvals.map((approval) =>
-            approval.id === item.id
-              ? { ...approval, status: 'denied', summary: `${approval.summary} 거절됨` }
-              : approval,
-          ),
-          timeline: [
-            createTimelineEvent('step.denied', `${item.summary} 거절됨`),
-            createTimelineEvent('plan.updated', 'plan status changed to failed'),
-            createTimelineEvent('task.updated', 'task status changed to failed'),
-            ...detail.timeline,
-          ],
-          audit_records: [
-            createAuditRecord('step.denied', 'command-center', `${item.summary} 거절됨`),
-            createAuditRecord('task.updated', 'command-center', 'Task moved to failed after denial'),
-            ...detail.audit_records,
-          ],
-        };
-      } else if (action === 'request_changes') {
-        nextTaskSummary = 'Reviewer asked for changes before deciding on this approval.';
-        nextDetail = {
-          ...detail,
-          task: { ...detail.task, summary: nextTaskSummary },
-          approvals: detail.approvals.map((approval) =>
-            approval.id === item.id
-              ? { ...approval, summary: `${approval.summary} 변경 요청됨` }
-              : approval,
-          ),
-          timeline: [
-            createTimelineEvent('step.approval_requested', 'Changes requested before approval decision'),
-            ...detail.timeline,
-          ],
-          audit_records: [
-            createAuditRecord('step.approval_requested', 'command-center', 'Changes requested before approval decision'),
-            ...detail.audit_records,
-          ],
-        };
-      } else if (action === 'cancel_task') {
-        nextTaskStatus = 'canceled';
-        nextPlanStatus = 'canceled';
-        nextTaskSummary = 'Task canceled from the approval queue before any risky action resumed.';
-        shouldRemoveApproval = true;
-        nextDetail = {
-          ...detail,
-          task: { ...detail.task, status: nextTaskStatus, summary: nextTaskSummary },
-          plan: { ...detail.plan, status: nextPlanStatus },
-          steps: detail.steps.map((step) =>
-            step.id === item.step_id ? { ...step, status: 'skipped' } : step,
-          ),
-          approvals: detail.approvals.map((approval) =>
-            approval.id === item.id
-              ? { ...approval, status: 'denied', summary: 'Task canceled from approval queue' }
-              : approval,
-          ),
-          timeline: [
-            createTimelineEvent('task.updated', 'task status changed to canceled'),
-            createTimelineEvent('plan.updated', 'plan status changed to canceled'),
-            ...detail.timeline,
-          ],
-          audit_records: [
-            createAuditRecord('task.updated', 'command-center', 'Task canceled from approval queue'),
-            ...detail.audit_records,
-          ],
-        };
-      }
-
-      const nextPendingApprovalCount = shouldRemoveApproval
-        ? Math.max(0, detail.approvals.filter((approval) => approval.status === 'requested').length - 1)
-        : nextDetail.approvals.filter((approval) => approval.status === 'requested').length;
-
-      setTaskItemsState((currentItems) =>
-        sortTaskItems(
-          currentItems.map((task) =>
-            task.id === item.task_id
-              ? {
-                  ...task,
-                  status: nextTaskStatus,
-                  summary: nextTaskSummary,
-                  pending_approval_count: nextPendingApprovalCount,
-                  updated_at: new Date().toISOString(),
-                }
-              : task,
-          ),
-        ),
+    try {
+      const nextState = await resolveApprovalAction(item.id, action);
+      setCommandCenterState({
+        taskItems: sortTaskItems(nextState.taskItems),
+        approvalQueue: nextState.approvalQueue,
+        taskDetails: nextState.taskDetails,
+      });
+      setRuntimeMode('api');
+      setBannerMessage(
+        action === 'approve'
+          ? 'Approval resolved through the orchestrator. The blocked step resumed successfully.'
+          : 'Approval resolved through the orchestrator. The blocked step stayed closed.',
       );
-
-      if (shouldRemoveApproval) {
-        setApprovalQueueState((currentQueue) => currentQueue.filter((entry) => entry.id !== item.id));
-      } else if (action === 'request_changes') {
-        setApprovalQueueState((currentQueue) =>
-          currentQueue.map((entry) =>
-            entry.id === item.id
-              ? { ...entry, summary: 'Changes requested before approval decision' }
-              : entry,
-          ),
-        );
-      }
-
-      return {
-        ...currentDetails,
-        [item.task_id]: nextDetail,
-      };
-    });
+    } catch (error) {
+      setBannerMessage(
+        error instanceof Error
+          ? `Approval action failed: ${error.message}`
+          : 'Approval action failed.',
+      );
+    } finally {
+      setBusyApprovalId(null);
+    }
   };
 
   if (!selectedDetail) {
@@ -523,18 +412,38 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell">
+      <div className="app-shell">
       <main className="dashboard">
+        <section className="panel runtime-banner" aria-label="Runtime mode">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">Runtime</p>
+              <h2>{runtimeMode === 'api' ? 'Live Dev Runtime' : 'Generated Snapshot'}</h2>
+            </div>
+            <span className={`summary-chip ${runtimeMode === 'api' ? '' : 'attention'}`}>
+              {runtimeMode === 'api' ? 'Connected' : 'Fallback'}
+            </span>
+          </div>
+          <div className="section-body">
+            <p className="overview-copy">{bannerMessage}</p>
+          </div>
+        </section>
+
         <Overview detail={selectedDetail} />
 
         <div className="layout-grid">
           <div className="sidebar-column">
-            <TaskList items={taskItemsState} selectedTaskId={selectedTaskId} onSelect={setSelectedTaskId} />
+            <TaskList
+              items={commandCenterState.taskItems}
+              selectedTaskId={selectedTaskId}
+              onSelect={setSelectedTaskId}
+            />
             <ApprovalQueueList
-              items={approvalQueueState}
+              items={commandCenterState.approvalQueue}
               selectedTaskId={selectedTaskId}
               onSelect={setSelectedTaskId}
               onAction={handleApprovalAction}
+              busyApprovalId={busyApprovalId}
             />
           </div>
 
