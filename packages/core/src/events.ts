@@ -19,6 +19,10 @@ export type EventType =
   | "action.failed"
   | "policy.evaluated"
   | "risk.flagged"
+  | "safety.lockdown_enabled"
+  | "safety.lockdown_disabled"
+  | "capability.revoked"
+  | "capability.restored"
   | "memory.read"
   | "memory.written"
   | "memory.deleted"
@@ -38,6 +42,10 @@ export const EVENT_TYPES = [
   "action.failed",
   "policy.evaluated",
   "risk.flagged",
+  "safety.lockdown_enabled",
+  "safety.lockdown_disabled",
+  "capability.revoked",
+  "capability.restored",
   "memory.read",
   "memory.written",
   "memory.deleted",
@@ -143,6 +151,24 @@ export type EventPayloadMap = {
     reasons: string[];
     deny_reasons: string[];
     summary: string;
+  };
+  "safety.lockdown_enabled": {
+    reason: string;
+    active: true;
+  };
+  "safety.lockdown_disabled": {
+    reason: string;
+    active: false;
+  };
+  "capability.revoked": {
+    capability: string;
+    reason: string;
+    active: true;
+  };
+  "capability.restored": {
+    capability: string;
+    reason: string;
+    active: false;
   };
   "memory.read": {
     query: string;

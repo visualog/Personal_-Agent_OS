@@ -9,6 +9,8 @@ import { InMemoryEventBus } from "./event-bus.js";
 import type { Approval, AuditRecord, Plan, Step, Task } from "./domain.js";
 import type { Event } from "./events.js";
 import type { Capability } from "./policy.js";
+import type { RuntimeControl } from "./runtime-control.js";
+import { InMemoryRuntimeControl } from "./runtime-control.js";
 import {
   createPlan,
   type PlannerResult,
@@ -55,6 +57,7 @@ export interface OrchestratorDependencies {
   taskStore?: TaskStore;
   planStore?: PlanStore;
   stepStore?: StepStore;
+  runtimeControl?: RuntimeControl;
   granted_capabilities?: readonly Capability[];
 }
 
@@ -157,6 +160,10 @@ function createStepStore(stepStore?: StepStore): StepStore {
   return stepStore ?? new InMemoryStepStore();
 }
 
+function createRuntimeControl(runtimeControl?: RuntimeControl): RuntimeControl {
+  return runtimeControl ?? new InMemoryRuntimeControl();
+}
+
 export class PersonalAgentOrchestrator {
   private readonly eventBus: EventBus;
   private readonly auditLog: AuditLog;
@@ -164,6 +171,7 @@ export class PersonalAgentOrchestrator {
   private readonly taskStore: TaskStore;
   private readonly planStore: PlanStore;
   private readonly stepStore: StepStore;
+  private readonly runtimeControl: RuntimeControl;
   private readonly gateway: OrchestratorToolGateway;
   private readonly grantedCapabilities: readonly Capability[];
   private readonly ownsGateway: boolean;
@@ -175,6 +183,7 @@ export class PersonalAgentOrchestrator {
     this.taskStore = createTaskStore(dependencies.taskStore);
     this.planStore = createPlanStore(dependencies.planStore);
     this.stepStore = createStepStore(dependencies.stepStore);
+    this.runtimeControl = createRuntimeControl(dependencies.runtimeControl);
     this.ownsGateway = dependencies.gateway === undefined;
     this.gateway = dependencies.gateway ?? new InMemoryToolGateway();
     this.grantedCapabilities = dependencies.granted_capabilities ?? ["workspace.read"];
@@ -229,6 +238,8 @@ export class PersonalAgentOrchestrator {
         approval_granted: false,
         audit_available: true,
         sandbox_matched: true,
+        system_lockdown: this.runtimeControl.isLockdownActive(),
+        revoked_capabilities: this.runtimeControl.getRevokedCapabilities(),
       });
       if ("policy" in execution && execution.policy) {
         const policyEvent = this.createPolicyEvaluatedEvent({
@@ -515,6 +526,8 @@ export class PersonalAgentOrchestrator {
       approval_granted: approvalGranted,
       audit_available: true,
       sandbox_matched: true,
+      system_lockdown: this.runtimeControl.isLockdownActive(),
+      revoked_capabilities: this.runtimeControl.getRevokedCapabilities(),
     });
     if ("policy" in execution && execution.policy) {
       const policyEvent = this.createPolicyEvaluatedEvent({

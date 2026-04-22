@@ -17,6 +17,8 @@ export interface PolicyAction {
   audit_available?: boolean;
   tool_registered?: boolean;
   sandbox_matched?: boolean;
+  system_lockdown?: boolean;
+  revoked_capabilities?: readonly Capability[];
 }
 
 export interface PolicyEvaluationResult {
@@ -55,6 +57,12 @@ export function evaluatePolicy(action: PolicyAction): PolicyEvaluationResult {
   const reasons: string[] = [];
   const deny_reasons: DenyReason[] = [];
   const required_capabilities = uniqueCapabilities(action.requested_capabilities);
+  const revokedCapabilities = uniqueCapabilities(action.revoked_capabilities ?? []);
+
+  if (action.system_lockdown === true) {
+    reasons.push("system lockdown active");
+    deny_reasons.push("system_lockdown");
+  }
 
   const missingCapabilities = required_capabilities.filter(
     (capability) => !action.granted_capabilities.includes(capability),
@@ -64,6 +72,16 @@ export function evaluatePolicy(action: PolicyAction): PolicyEvaluationResult {
       `missing capability: ${missingCapabilities.join(", ")}`,
     );
     deny_reasons.push("missing_capability");
+  }
+
+  const revokedRequestedCapabilities = required_capabilities.filter(
+    (capability) => revokedCapabilities.includes(capability),
+  );
+  if (revokedRequestedCapabilities.length > 0) {
+    reasons.push(
+      `permission revoked: ${revokedRequestedCapabilities.join(", ")}`,
+    );
+    deny_reasons.push("permission_revoked");
   }
 
   if (action.tool_registered === false) {

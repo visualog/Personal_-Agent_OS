@@ -18,6 +18,7 @@
 - [Approval Flow Runtime](security/approval-flow-runtime.md): 승인 요청 저장과 상태 전이 계약
 - [Memory Privacy](security/memory-privacy.md): 메모리 분류와 민감정보 처리
 - [Memory API Runtime](security/memory-api-runtime.md): 메모리 write/search/delete 최소 런타임 계약
+- [Runtime Control](security/runtime-control.md): 긴급 정지와 capability 권한 회수 계약
 - [MVP Backlog](issues/mvp-backlog.md): GitHub Issue로 옮길 작업 목록
 - [Issue Template](issues/issue-template.md): 이슈 작성 템플릿
 

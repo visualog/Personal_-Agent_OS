@@ -116,3 +116,30 @@ test("tool_registered false denies tool_not_registered", () => {
   assert.deepEqual(result.deny_reasons, ["tool_not_registered"]);
   assert.ok(result.reasons.includes("tool not registered: workspace.read_file"));
 });
+
+test("system lockdown denies new tool calls with system_lockdown", () => {
+  const result = evaluatePolicy(
+    createAction({
+      system_lockdown: true,
+    }),
+  );
+
+  assert.equal(result.decision, "deny");
+  assert.deepEqual(result.deny_reasons, ["system_lockdown"]);
+  assert.ok(result.reasons.includes("system lockdown active"));
+});
+
+test("revoked capability denies with permission_revoked", () => {
+  const result = evaluatePolicy(
+    createAction({
+      requested_capabilities: ["workspace.write"],
+      granted_capabilities: ["workspace.write"],
+      revoked_capabilities: ["workspace.write"],
+      risk_level: "medium",
+    }),
+  );
+
+  assert.equal(result.decision, "deny");
+  assert.deepEqual(result.deny_reasons, ["permission_revoked"]);
+  assert.ok(result.reasons.includes("permission revoked: workspace.write"));
+});

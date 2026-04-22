@@ -19,6 +19,8 @@ export interface ToolExecutionRequest {
   approval_granted?: boolean;
   audit_available?: boolean;
   sandbox_matched?: boolean;
+  system_lockdown?: boolean;
+  revoked_capabilities?: readonly Capability[];
 }
 
 export type ToolExecutionResult =
@@ -71,6 +73,8 @@ export class InMemoryToolGateway {
         audit_available: request.audit_available,
         tool_registered: false,
         sandbox_matched: request.sandbox_matched,
+        system_lockdown: request.system_lockdown,
+        revoked_capabilities: request.revoked_capabilities,
       });
 
       return { status: "denied", policy };
@@ -88,6 +92,8 @@ export class InMemoryToolGateway {
       audit_available: request.audit_available,
       tool_registered: true,
       sandbox_matched: request.sandbox_matched,
+      system_lockdown: request.system_lockdown,
+      revoked_capabilities: request.revoked_capabilities,
     };
 
     const policy = evaluatePolicy(policyAction);

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import * as core from "../src/index.js";
-import type { ToolDefinition } from "../src/index.js";
+import type { ToolDefinition, ToolExecutionResult } from "../src/index.js";
 
 const {
   InMemoryToolRegistry,
@@ -26,12 +26,9 @@ const {
       approval_granted?: boolean;
       audit_available?: boolean;
       sandbox_matched?: boolean;
-    }) => Promise<
-      | { status: "succeeded"; output: unknown }
-      | { status: "requires_approval" }
-      | { status: "denied" }
-      | { status: "failed"; error: unknown }
-    >;
+      system_lockdown?: boolean;
+      revoked_capabilities?: readonly string[];
+    }) => Promise<ToolExecutionResult>;
   };
 };
 
@@ -208,4 +205,54 @@ test("gateway returns failed when handler throws", async () => {
 
   assert.equal(result.status, "failed");
   assert.match(String((result as { error: unknown }).error), /boom/);
+});
+
+test("gateway denies new execution while system lockdown is active", async () => {
+  const gateway = new InMemoryToolGateway();
+  const tool = createToolDefinition();
+
+  gateway.registerTool(tool, async () => ({ ok: true }));
+
+  const result = await gateway.execute({
+    action_id: "action_07",
+    step_id: "step_07",
+    tool_name: tool.name,
+    input: { path: "README.md" },
+    granted_capabilities: ["workspace.read"],
+    scope_allowed: true,
+    sandbox_matched: true,
+    system_lockdown: true,
+  });
+
+  assert.equal(result.status, "denied");
+  if ("policy" in result && result.policy) {
+    assert.deepEqual(result.policy.deny_reasons, ["system_lockdown"]);
+  }
+});
+
+test("gateway denies execution when requested capability has been revoked", async () => {
+  const gateway = new InMemoryToolGateway();
+  const tool = createToolDefinition({
+    name: "workspace.write_file",
+    capabilities: ["workspace.write"],
+    default_risk: "medium",
+  });
+
+  gateway.registerTool(tool, async () => ({ ok: true }));
+
+  const result = await gateway.execute({
+    action_id: "action_08",
+    step_id: "step_08",
+    tool_name: tool.name,
+    input: { path: "README.md" },
+    granted_capabilities: ["workspace.write"],
+    revoked_capabilities: ["workspace.write"],
+    scope_allowed: true,
+    sandbox_matched: true,
+  });
+
+  assert.equal(result.status, "denied");
+  if ("policy" in result && result.policy) {
+    assert.deepEqual(result.policy.deny_reasons, ["permission_revoked"]);
+  }
 });

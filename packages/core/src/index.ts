@@ -16,3 +16,4 @@ export * from "./status.js";
 export * from "./state-store.js";
 export * from "./read-model.js";
 export * from "./memory-api.js";
+export * from "./runtime-control.js";
