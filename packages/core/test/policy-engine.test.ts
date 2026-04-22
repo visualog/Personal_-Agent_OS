@@ -143,3 +143,15 @@ test("revoked capability denies with permission_revoked", () => {
   assert.deepEqual(result.deny_reasons, ["permission_revoked"]);
   assert.ok(result.reasons.includes("permission revoked: workspace.write"));
 });
+
+test("audit unavailable denies with audit_unavailable so execution cannot proceed without traceability", () => {
+  const result = evaluatePolicy(
+    createAction({
+      audit_available: false,
+    }),
+  );
+
+  assert.equal(result.decision, "deny");
+  assert.deepEqual(result.deny_reasons, ["audit_unavailable"]);
+  assert.ok(result.reasons.includes("audit unavailable for action: action_01"));
+});
