@@ -4,8 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "generate:web-demo": "node --import tsx scripts/generate-command-center-demo.ts",
+    "predev:web": "npm run generate:web-demo",
     "dev:web": "vite",
     "build": "tsc -p tsconfig.json",
+    "prebuild:web": "npm run generate:web-demo",
     "build:web": "vite build",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "node --test --import tsx packages/core/test/*.test.ts"

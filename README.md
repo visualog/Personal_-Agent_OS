@@ -19,7 +19,7 @@ The repository now also includes a first runnable web prototype at `apps/web` th
 - risk flags
 - timeline and audit records
 
-This first UI uses mocked Command Center data so we can stabilize the information architecture before wiring live runtime state into the browser.
+This UI is fed by a runtime-backed demo snapshot generated from the core orchestrator before `dev:web` and `build:web`, so the browser reflects real command-center state shapes rather than hand-written mock objects.
 
 ## Repository Layout
 

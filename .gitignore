@@ -4,6 +4,7 @@
 # Node
 node_modules/
 dist-web/
+apps/web/src/generated/
 dist/
 build/
 .next/

@@ -233,11 +233,32 @@ function Overview({ detail }: { detail: TaskDetailView }) {
 }
 
 export default function App() {
-  const [selectedTaskId, setSelectedTaskId] = useState('task_b');
+  const [selectedTaskId, setSelectedTaskId] = useState(() => taskItems[0]?.id ?? '');
 
   const selectedDetail = useMemo(() => {
-    return taskDetails[selectedTaskId] ?? taskDetails.task_a;
+    if (selectedTaskId && taskDetails[selectedTaskId]) {
+      return taskDetails[selectedTaskId];
+    }
+
+    const fallbackTaskId = taskItems[0]?.id;
+    return fallbackTaskId ? taskDetails[fallbackTaskId] : undefined;
   }, [selectedTaskId]);
+
+  if (!selectedDetail) {
+    return (
+      <div className="app-shell">
+        <main className="dashboard">
+          <section className="overview-band" aria-label="Task Overview">
+            <div>
+              <p className="eyebrow">Selected Task</p>
+              <h1>No tasks available</h1>
+              <p className="overview-copy">Run the command center demo generator to populate runtime state.</p>
+            </div>
+          </section>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="app-shell">
