@@ -5,6 +5,9 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  InMemoryPlanStore,
+  InMemoryStepStore,
+  InMemoryTaskStore,
   PersonalAgentOrchestrator,
   type Event,
   type OrchestratorToolGateway,
@@ -503,4 +506,81 @@ test("run with approval pending marks task waiting_approval, plan partially_appr
   assert.equal(resumed.stepResult?.execution.status, "succeeded");
   assert.equal(initial.task.status, "waiting_approval");
   assert.equal(initial.plan.status, "partially_approved");
+});
+
+test("run persists created task, drafted plan, stored steps, and final completed states when taskStore/planStore/stepStore are injected", async (t) => {
+  const workspaceRoot = await createTempWorkspace();
+  t.after(async () => {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  });
+
+  const taskStore = new InMemoryTaskStore();
+  const planStore = new InMemoryPlanStore();
+  const stepStore = new InMemoryStepStore();
+  const orchestrator = new PersonalAgentOrchestrator({
+    granted_capabilities: ["workspace.read"],
+    taskStore,
+    planStore,
+    stepStore,
+  });
+
+  const result = await orchestrator.run({
+    raw_request: "Inspect the workspace and read the README.",
+    created_by: "user_store_success",
+    workspaceRoot,
+  });
+
+  const persistedTask = taskStore.get(result.task.id);
+  const persistedPlan = planStore.get(result.plan.id);
+  const persistedSteps = stepStore.listByPlan(result.plan.id);
+
+  assert.ok(persistedTask);
+  assert.ok(persistedPlan);
+  assert.equal(persistedTask?.status, "completed");
+  assert.equal(persistedPlan?.status, "completed");
+  assert.equal(persistedSteps.length, result.plan.steps.length);
+  assert.ok(persistedSteps.every((step) => step.status === "completed"));
+  assert.deepEqual(
+    persistedSteps.map((step) => step.id).sort(),
+    result.plan.steps.map((step) => step.id).sort(),
+  );
+});
+
+test("approval-required run persists waiting_approval task state, partially_approved plan state, and waiting_approval step state in injected stores", async (t) => {
+  const workspaceRoot = await createTempWorkspace();
+  t.after(async () => {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  });
+
+  const taskStore = new InMemoryTaskStore();
+  const planStore = new InMemoryPlanStore();
+  const stepStore = new InMemoryStepStore();
+  const gateway = createApprovalAwareGateway();
+  const orchestrator = new PersonalAgentOrchestrator({
+    granted_capabilities: ["workspace.read", "workspace.write"],
+    gateway,
+    taskStore,
+    planStore,
+    stepStore,
+  });
+
+  const result = await orchestrator.run({
+    raw_request: "Inspect the workspace and read the README.",
+    created_by: "user_store_waiting",
+    workspaceRoot,
+  });
+
+  const persistedTask = taskStore.get(result.task.id);
+  const persistedPlan = planStore.get(result.plan.id);
+  const persistedSteps = stepStore.listByPlan(result.plan.id);
+
+  assert.ok(persistedTask);
+  assert.ok(persistedPlan);
+  assert.equal(persistedTask?.status, "waiting_approval");
+  assert.equal(persistedPlan?.status, "partially_approved");
+  assert.equal(persistedSteps.length, result.plan.steps.length);
+  assert.deepEqual(
+    persistedSteps.map((step) => step.status),
+    ["completed", "waiting_approval"],
+  );
 });

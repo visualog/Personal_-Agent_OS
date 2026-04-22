@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -9,6 +9,9 @@ import type { Event, OrchestratorToolGateway, ToolDefinition } from "../src/inde
 
 const {
   InMemoryApprovalStore,
+  InMemoryPlanStore,
+  InMemoryStepStore,
+  InMemoryTaskStore,
   InMemoryToolGateway,
   PersonalAgentOrchestrator,
 } = core;
@@ -207,4 +210,139 @@ test("orchestrator with pre-approved custom gateway path can succeed when policy
   assert.equal(getEventIndexes(result.events, "policy.evaluated").length, result.plan.steps.length);
   assert.equal(getEventIndexes(result.events, "plan.updated").length, 1);
   assert.equal(getEventIndexes(result.events, "task.updated").length, 1);
+});
+
+test("resumeApproval with approved resolution updates persisted task, plan, and blocked step state to completed in injected stores", async (t) => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "paos-approval-resume-store-"));
+  await writeFile(path.join(workspaceRoot, "README.md"), "Personal Agent OS\n");
+  t.after(async () => {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  });
+
+  const taskStore = new InMemoryTaskStore();
+  const planStore = new InMemoryPlanStore();
+  const stepStore = new InMemoryStepStore();
+  const approvalStore = new InMemoryApprovalStore();
+  const gateway = new InMemoryToolGateway();
+
+  gateway.registerTool({
+    name: "workspace.list_files",
+    description: "List files in the workspace",
+    input_schema: { type: "object" },
+    output_schema: { type: "object" },
+    capabilities: ["workspace.read"],
+    default_risk: "low",
+    requires_approval: false,
+    sandbox: "workspace",
+  }, async () => ({
+    entries: [{ path: "README.md", type: "file" }],
+  }));
+
+  gateway.registerTool(createApprovalStoreToolDefinition({
+    name: "workspace.read_file",
+    capabilities: ["workspace.write"],
+  }), async () => ({ ok: true }));
+
+  const orchestrator = new PersonalAgentOrchestrator({
+    approvalStore,
+    gateway,
+    granted_capabilities: ["workspace.read", "workspace.write"],
+    taskStore,
+    planStore,
+    stepStore,
+  });
+
+  const initial = await orchestrator.run({
+    raw_request: "Inspect the workspace and read the README.",
+    created_by: "user_approval_store_resume",
+    workspaceRoot,
+  });
+
+  const pendingApproval = initial.approvals[0];
+  assert.ok(pendingApproval);
+  assert.equal(taskStore.get(initial.task.id)?.status, "waiting_approval");
+  assert.equal(planStore.get(initial.plan.id)?.status, "partially_approved");
+  assert.equal(stepStore.get(pendingApproval!.step_id)?.status, "waiting_approval");
+
+  const resumed = await orchestrator.resumeApproval({
+    approval_id: pendingApproval!.id,
+    resolution: "approved",
+    task: initial.task,
+    plan: initial.plan,
+    workspaceRoot,
+  });
+
+  assert.equal(resumed.status, "resolved");
+  assert.equal(taskStore.get(initial.task.id)?.status, "completed");
+  assert.equal(planStore.get(initial.plan.id)?.status, "completed");
+  assert.equal(stepStore.get(pendingApproval!.step_id)?.status, "completed");
+});
+
+test("resumeApproval with denied resolution persists failed task/plan state and blocked step state without re-executing the tool in injected stores", async (t) => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "paos-approval-deny-store-"));
+  await writeFile(path.join(workspaceRoot, "README.md"), "Personal Agent OS\n");
+  t.after(async () => {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  });
+
+  const taskStore = new InMemoryTaskStore();
+  const planStore = new InMemoryPlanStore();
+  const stepStore = new InMemoryStepStore();
+  const approvalStore = new InMemoryApprovalStore();
+  const gateway = new InMemoryToolGateway();
+  let readExecutions = 0;
+
+  gateway.registerTool({
+    name: "workspace.list_files",
+    description: "List files in the workspace",
+    input_schema: { type: "object" },
+    output_schema: { type: "object" },
+    capabilities: ["workspace.read"],
+    default_risk: "low",
+    requires_approval: false,
+    sandbox: "workspace",
+  }, async () => ({
+    entries: [{ path: "README.md", type: "file" }],
+  }));
+
+  gateway.registerTool(createApprovalStoreToolDefinition({
+    name: "workspace.read_file",
+    capabilities: ["workspace.write"],
+  }), async () => {
+    readExecutions += 1;
+    return { ok: true };
+  });
+
+  const orchestrator = new PersonalAgentOrchestrator({
+    approvalStore,
+    gateway,
+    granted_capabilities: ["workspace.read", "workspace.write"],
+    taskStore,
+    planStore,
+    stepStore,
+  });
+
+  const initial = await orchestrator.run({
+    raw_request: "Inspect the workspace and read the README.",
+    created_by: "user_approval_store_deny",
+    workspaceRoot,
+  });
+
+  const pendingApproval = initial.approvals[0];
+  assert.ok(pendingApproval);
+  assert.equal(readExecutions, 0);
+
+  const denied = await orchestrator.resumeApproval({
+    approval_id: pendingApproval!.id,
+    resolution: "denied",
+    task: initial.task,
+    plan: initial.plan,
+    workspaceRoot,
+  });
+
+  assert.equal(denied.status, "resolved");
+  assert.equal(taskStore.get(initial.task.id)?.status, "failed");
+  assert.equal(planStore.get(initial.plan.id)?.status, "failed");
+  assert.equal(stepStore.get(pendingApproval!.step_id)?.status, "blocked");
+  assert.equal(readExecutions, 0);
 });

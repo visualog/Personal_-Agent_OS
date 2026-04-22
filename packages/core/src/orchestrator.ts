@@ -22,6 +22,16 @@ import {
   withUpdatedPlan,
   withUpdatedTask,
 } from "./status.js";
+import type {
+  PlanStore,
+  StepStore,
+  TaskStore,
+} from "./state-store.js";
+import {
+  InMemoryPlanStore,
+  InMemoryStepStore,
+  InMemoryTaskStore,
+} from "./state-store.js";
 import {
   InMemoryToolGateway,
   type ToolGatewayTool,
@@ -42,6 +52,9 @@ export interface OrchestratorDependencies {
   eventBus?: EventBus;
   auditLog?: AuditLog;
   gateway?: OrchestratorToolGateway;
+  taskStore?: TaskStore;
+  planStore?: PlanStore;
+  stepStore?: StepStore;
   granted_capabilities?: readonly Capability[];
 }
 
@@ -130,10 +143,25 @@ function createApprovalStore(approvalStore?: ApprovalStore): ApprovalStore {
   return approvalStore ?? new InMemoryApprovalStore();
 }
 
+function createTaskStore(taskStore?: TaskStore): TaskStore {
+  return taskStore ?? new InMemoryTaskStore();
+}
+
+function createPlanStore(planStore?: PlanStore): PlanStore {
+  return planStore ?? new InMemoryPlanStore();
+}
+
+function createStepStore(stepStore?: StepStore): StepStore {
+  return stepStore ?? new InMemoryStepStore();
+}
+
 export class PersonalAgentOrchestrator {
   private readonly eventBus: EventBus;
   private readonly auditLog: AuditLog;
   private readonly approvalStore: ApprovalStore;
+  private readonly taskStore: TaskStore;
+  private readonly planStore: PlanStore;
+  private readonly stepStore: StepStore;
   private readonly gateway: OrchestratorToolGateway;
   private readonly grantedCapabilities: readonly Capability[];
   private readonly ownsGateway: boolean;
@@ -142,6 +170,9 @@ export class PersonalAgentOrchestrator {
     this.eventBus = createEventBus(dependencies.eventBus);
     this.auditLog = createAuditLog(dependencies.auditLog);
     this.approvalStore = createApprovalStore(dependencies.approvalStore);
+    this.taskStore = createTaskStore(dependencies.taskStore);
+    this.planStore = createPlanStore(dependencies.planStore);
+    this.stepStore = createStepStore(dependencies.stepStore);
     this.ownsGateway = dependencies.gateway === undefined;
     this.gateway = dependencies.gateway ?? new InMemoryToolGateway();
     this.grantedCapabilities = dependencies.granted_capabilities ?? ["workspace.read"];
@@ -163,6 +194,9 @@ export class PersonalAgentOrchestrator {
 
     this.publishAndAudit(taskResult.event);
     this.publishAndAudit(planResult.event);
+    this.persistTask(taskResult.task);
+    this.persistPlan(planResult.plan);
+    this.persistSteps(planResult.plan.steps);
     for (const step of planResult.plan.steps) {
       this.publishAndAudit(this.createStepReadyEvent({
         taskId: taskResult.task.id,
@@ -256,6 +290,9 @@ export class PersonalAgentOrchestrator {
       previousStatus: taskResult.task.status,
       task: finalizedTask,
     }));
+    this.persistTask(finalizedTask);
+    this.persistPlan(finalizedPlan);
+    this.persistSteps(finalizedSteps);
 
     return {
       task: finalizedTask,
@@ -329,6 +366,9 @@ export class PersonalAgentOrchestrator {
         previousStatus: input.task.status,
         task: finalizedTask,
       }));
+      this.persistTask(finalizedTask);
+      this.persistPlan(finalizedPlan);
+      this.persistSteps(deniedSteps);
 
       return {
         status: "resolved",
@@ -384,6 +424,9 @@ export class PersonalAgentOrchestrator {
       previousStatus: input.task.status,
       task: finalizedTask,
     }));
+    this.persistTask(finalizedTask);
+    this.persistPlan(finalizedPlan);
+    this.persistSteps(resumedSteps);
 
     return {
       status: "resolved",
@@ -403,6 +446,20 @@ export class PersonalAgentOrchestrator {
   private publishAndAudit(event: Event): void {
     this.eventBus.publish(event);
     this.auditLog.recordEvent(event, summarizeEvent(event));
+  }
+
+  private persistTask(task: Task): void {
+    this.taskStore.save(task);
+  }
+
+  private persistPlan(plan: Plan): void {
+    this.planStore.save(plan);
+  }
+
+  private persistSteps(steps: readonly Step[]): void {
+    for (const step of steps) {
+      this.stepStore.save(step);
+    }
   }
 
   private ensureWorkspaceTools(workspaceRoot: string): void {

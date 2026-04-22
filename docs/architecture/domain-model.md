@@ -10,10 +10,33 @@
 - 상태는 단방향 진행을 기본으로 하며, 실패/거절/취소는 종료 상태다.
 - 정책 판정과 승인 결과는 실제 실행보다 먼저 기록된다.
 - 민감 정보는 원문 저장보다 마스킹, 해시, 요약 저장을 우선한다.
-- 현재 런타임은 `Task`, `Plan`, `Step`의 상태를 별도 Store에 다시 쓰지 않는다. 지금 시점의 상태는 생성 시점 필드와 append-only 이벤트, `ApprovalStore` 조합으로 해석한다.
+- 현재 런타임은 `Task`, `Plan`, `Step`의 상태를 계산해 반환할 수 있고, 이를 `TaskStore`, `PlanStore`, `StepStore`에 실제로 반영한다.
+- 첫 구현은 모두 in-memory store다. append-only 이벤트를 대체하지 않고, Orchestrator가 계산한 최신 snapshot을 보관하는 projection layer로 둔다.
 - 아래 전이 규칙은 두 층으로 읽어야 한다.
-  - `도메인 목표 상태`: 앞으로 Store에 반영될 정규 상태 머신
+  - `도메인 목표 상태`: Store에 저장될 정규 상태 머신
   - `현재 런타임 관찰 상태`: `PersonalAgentOrchestrator`가 실제로 만드는 객체와 이벤트 기준 해석
+
+## Runtime Stores
+
+도입 순서:
+
+1. `TaskStore`: Task 생성과 최종 상태 갱신부터 저장
+2. `PlanStore`: Plan 초안 생성과 상태 갱신 저장
+3. `StepStore`: 각 Step의 현재 상태와 approval 연결 상태 저장
+
+최소 in-memory store 규칙:
+
+- 각 Store는 프로세스 메모리 안에서 최신 snapshot 1개를 유지한다.
+- `save(...)`, `get(...)`, `list...(...)`, `clear()` 정도의 좁은 API로 시작한다.
+- 반환값은 clone-safe immutable snapshot이어야 한다.
+- 상태 계산 로직은 Store 안에 넣지 않고, 초기에는 `Orchestrator + status.ts`가 계산한 결과를 저장한다.
+- EventBus와 AuditLog는 그대로 유지한다. Store는 현재 상태를 빠르게 조회하기 위한 projection이다.
+
+저장 책임:
+
+- `TaskStore`: `task.created`, `task.updated`에 대응하는 최신 Task snapshot
+- `PlanStore`: `plan.drafted`, `plan.updated`에 대응하는 최신 Plan snapshot
+- `StepStore`: `step.ready`, `step.approval_requested`, `step.approved`, `step.denied`, `action.*` 이후 계산된 최신 Step snapshot
 
 ## Task
 
@@ -54,16 +77,26 @@
 현재 런타임 관찰 상태:
 
 - `createTask(...)` 직후 `task.status`는 항상 `created`다.
-- `run(...)`은 `task.created` 이벤트와 이후 실행 이벤트를 남기지만, `task.status`를 `running`, `waiting_approval`, `completed`, `failed`로 다시 저장하지는 않는다.
+- Store 도입 전에는 `run(...)` 반환값과 이벤트로만 최신 상태를 해석한다.
+- Store 도입 후에는 같은 계산 결과를 `TaskStore.update(...)`로 반영한다.
 - 따라서 현재 구현에서 Task 레벨 상태는 아래처럼 해석한다.
   - 마지막 실행 결과에 `requires_approval`가 하나 이상 있으면 운영상 `waiting_approval`
   - 모든 Step 결과가 `succeeded`면 운영상 `completed`
   - 하나 이상 `denied | failed`가 있고 복구 흐름이 없으면 운영상 `failed`
   - `resolveApproval(... approved)` 이후 보류 Step이 재실행되면 운영상 `running -> completed|failed`
-- 바로 분리 가능한 후속 이슈:
-  - `TaskStore` 추가
-  - `task.updated` 발행 및 영속 상태 반영
-  - Task 최종 상태 계산기를 이벤트 해석이 아닌 저장 로직으로 이동
+
+최소 `TaskStore` 계약:
+
+- `save(task: Task): void`
+- `get(taskId: string): Task | null`
+- `list(): readonly Task[]`
+- `clear(): void`
+
+Store write 규칙:
+
+- `task.created` 직후 `save(...)`
+- 각 Step 실행 결과를 `withUpdatedTask(...)`로 계산한 뒤 `save(...)`
+- `resumeApproval(...) approved|denied|expired` 이후 다시 계산한 Task snapshot으로 `save(...)`
 
 ## Plan
 
@@ -103,16 +136,26 @@ Task를 실행 가능한 Step 묶음으로 분해한 실행 계획이다.
 - `createPlan(...)` 직후 `plan.status`는 항상 `drafted`다.
 - 현재 Planner는 승인 요구를 사전에 계산하지 않고 `plan.drafted.payload.requires_approval`도 항상 `false`로 시작한다.
 - 승인 필요 여부는 Plan 생성 후 Step 실행 시점의 `ToolGateway.execute(...)` 결과로 드러난다.
-- 현재 구현은 `plan.updated`를 발행하지 않으며, `plan.status`도 `drafted`에서 바꾸지 않는다.
+- Store 도입 전에는 `withUpdatedPlan(...)` 결과를 반환값으로만 노출한다.
+- Store 도입 후에는 같은 결과를 `PlanStore.update(...)`에 반영한다.
 - 따라서 운영상 Plan 상태는 다음처럼 해석한다.
   - 첫 `action.started` 이후 `running`
   - 어떤 Step이 `step.approval_requested`를 만들면 부분적으로 `partially_approved` 성격을 가짐
   - 모든 Step이 `action.succeeded`면 `completed`
   - 하나라도 `action.failed`로 끝나고 후속 재개가 없으면 `failed`
-- 바로 분리 가능한 후속 이슈:
-  - `PlanStore` 추가
-  - `plan.updated` 이벤트 명세 고정
-  - `requires_approval`와 `risk_summary`를 Planner 예측값과 런타임 실측값으로 분리
+
+최소 `PlanStore` 계약:
+
+- `save(plan: Plan): void`
+- `get(planId: string): Plan | null`
+- `list(): readonly Plan[]`
+- `clear(): void`
+
+Store write 규칙:
+
+- `plan.drafted` 직후 `save(...)`
+- 각 Step 처리 후 새 `plan.updated` payload와 같은 snapshot으로 `save(...)`
+- `resumeApproval(...)`에서도 재실행 또는 거절 결과 직후 `save(...)`
 
 ## Step
 
@@ -153,7 +196,8 @@ Plan 안의 개별 실행 단위다. 하나의 Step은 보통 하나의 tool act
 현재 런타임 관찰 상태:
 
 - Planner가 만든 모든 `step.status`는 최초에 `ready`다.
-- 현재 오케스트레이터는 `step.status` 필드를 직접 갱신하지 않는다. Step의 실제 진행은 실행 결과와 이벤트로 해석한다.
+- Store 도입 전에는 Step의 실제 진행을 실행 결과와 이벤트로 해석한다.
+- Store 도입 후에는 각 Step 처리 직후 `StepStore.save(...)`로 최신 status와 `approval_id`를 반영한다.
 - 현재 구현의 정확한 런타임 분기는 아래와 같다.
 
 | 입력 상태 | Orchestrator 동작 | 관찰 가능한 결과 |
@@ -165,6 +209,23 @@ Plan 안의 개별 실행 단위다. 하나의 Step은 보통 하나의 tool act
 | `waiting_approval` + `resolveApproval(approved)` | `step.approved` 발행 후 같은 Step만 `approval_granted=true`로 재실행 | 운영상 `running -> completed|failed|waiting_approval` |
 | `waiting_approval` + `resolveApproval(denied|expired)` | `step.denied` 발행, Tool 실행 없음 | 운영상 종료, 최소 `blocked` 또는 `failed` 후보 |
 
+최소 `StepStore` 계약:
+
+- `save(step: Step): void`
+- `get(stepId: string): Step | null`
+- `listByPlan(planId: string): readonly Step[]`
+- `list(): readonly Step[]`
+- `clear(): void`
+
+Store write 규칙:
+
+- `plan.drafted` 직후 Planner가 만든 모든 Step을 `ready` 상태로 `save(...)`
+- `step.approval_requested` 직후 해당 Step을 `waiting_approval`로 갱신하고 `approval_id`를 포함한 snapshot을 `save(...)`
+- `action.succeeded` 직후 해당 Step을 `completed` snapshot으로 `save(...)`
+- `action.failed` 직후 해당 Step을 `failed` snapshot으로 `save(...)`
+- `step.denied` 직후 해당 Step을 최소 `blocked` 또는 `failed` 규칙 중 하나로 고정한 snapshot을 `save(...)`
+- `resumeApproval(...) approved` 경로에서는 재실행 직전 `ready`, 실행 성공 시 `completed`, 실패 시 `failed`, 재승인 필요 시 다시 `waiting_approval` snapshot을 각각 `save(...)`
+
 구현 제약:
 
 - 현재 런타임은 `skipped`, `blocked`를 실제 필드값으로 쓰지 않는다.
@@ -172,10 +233,10 @@ Plan 안의 개별 실행 단위다. 하나의 Step은 보통 하나의 tool act
 - 승인 후 재개는 같은 `step_id` 하나만 다시 실행한다. Plan 전체를 다시 돌리지 않는다.
 - 승인 후 재실행에서도 Gateway가 다시 `requires_approval`를 반환할 수 있다. 이 경우 같은 `task_id/step_id`의 기존 pending approval이 있으면 재사용하고, 없으면 새 approval을 만든다.
 
-바로 분리 가능한 후속 이슈:
+후속 구현 이슈:
 
-- `StepStore` 추가 및 `status`, `approval_id` 반영
-- `step.ready`와 `plan.updated` 실제 발행
+- `TaskStore`, `PlanStore`, `StepStore` in-memory 구현
+- Orchestrator write-through 저장 연결
 - `blocked`와 `skipped` 판정 규칙 구현
 - approval 재개 전 `approval.step_id -> plan.step_id` orphan 검증 강화
 
