@@ -224,7 +224,23 @@ Personal Agent OS의 모든 중요한 상태 변경은 이벤트로 기록한다
 
 ## 6. 이벤트 순서 예시
 
+이 절은 두 층으로 읽는다.
+
+- `현재 구현`: 지금 코드베이스에서 이미 관찰되는 순서
+- `Lifecycle 이벤트 구현 후`: `step.ready`, `policy.evaluated`, `task.updated`, `plan.updated`를 실제 발행하도록 붙였을 때의 목표 순서
+
+구현자는 새 이벤트를 추가할 때 기존 이벤트 의미를 바꾸지 말고, 기존 순서 사이에 끼워 넣는 방식으로 확장해야 한다.
+
 ### 읽기 중심 작업
+
+현재 구현:
+
+1. `task.created`
+2. `plan.drafted`
+3. `action.started`
+4. `action.succeeded`
+
+Lifecycle 이벤트 구현 후:
 
 1. `task.created`
 2. `plan.drafted`
@@ -232,12 +248,136 @@ Personal Agent OS의 모든 중요한 상태 변경은 이벤트로 기록한다
 4. `policy.evaluated` with `decision=allow`
 5. `action.started`
 6. `action.succeeded`
-7. `audit.recorded`
+7. `plan.updated` with the step marked `completed`
 8. `task.updated` with `status=completed`
 
 ### 승인 필요 작업
 
+현재 구현:
+
 1. `task.created`
+2. `plan.drafted`
+3. `action.started`
+4. `step.approval_requested`
+
+Lifecycle 이벤트 구현 후:
+
+1. `task.created`
+2. `plan.drafted`
+3. `step.ready`
+4. `policy.evaluated` with `decision=require_approval`
+5. `step.approval_requested`
+6. `plan.updated` with the step marked `waiting_approval`
+7. `task.updated` with `status=waiting_approval`
+
+### 승인 후 재개
+
+현재 구현:
+
+1. `step.approved`
+2. `action.started`
+3. `action.succeeded` or `step.approval_requested` or `action.failed`
+
+Lifecycle 이벤트 구현 후:
+
+1. `step.approved`
+2. `step.ready`
+3. `policy.evaluated` with `decision=allow`
+4. `action.started`
+5. `action.succeeded`
+6. `plan.updated` with the resumed step marked `completed`
+7. `task.updated` with `status=completed`
+
+### 승인 거절
+
+현재 구현:
+
+1. `step.denied`
+
+Lifecycle 이벤트 구현 후:
+
+1. `step.denied`
+2. `plan.updated` with the step marked `blocked`
+3. `task.updated` with `status=failed`
+
+## 7. 구현 규칙: lifecycle 이벤트를 붙일 때의 위치
+
+`step.ready`, `policy.evaluated`, `plan.updated`, `task.updated`는 아래 위치에 고정한다.
+
+### `step.ready`
+
+- 발행 시점: Orchestrator가 실제 실행 대상으로 고른 직후
+- 한 Step을 다시 실행할 때도 다시 발행한다
+- approval resume에서는 `step.approved` 뒤, `policy.evaluated` 앞에 와야 한다
+
+최소 payload:
+
+```json
+{
+  "plan_id": "string",
+  "step_id": "string",
+  "tool_name": "string",
+  "sequence": 0,
+  "status": "ready"
+}
+```
+
+### `policy.evaluated`
+
+- 발행 시점: Gateway 호출 전에 정책 판정이 정해진 직후
+- `action.started`보다 먼저 와야 한다
+- `decision=deny` 또는 `decision=require_approval`인 경우에도 반드시 남긴다
+
+최소 payload:
+
+```json
+{
+  "policy_decision_id": "string",
+  "step_id": "string",
+  "tool_name": "string",
+  "decision": "allow | require_approval | deny",
+  "risk_level": "low | medium | high | critical",
+  "required_capabilities": ["string"],
+  "reasons": ["string"]
+}
+```
+
+### `plan.updated`
+
+- 발행 시점: Step 결과가 Plan 상태를 바꾼 직후
+- `plan.drafted`를 대체하지 않는다
+- 한 번의 Step 시도마다 최대 한 번만 발행한다
+
+대표 상태 변화:
+
+- `drafted -> partially_approved`
+- `drafted -> completed`
+- `partially_approved -> completed`
+- `drafted -> failed`
+
+### `task.updated`
+
+- 발행 시점: 같은 Step 결과를 Task 상태로 투영한 직후
+- 항상 같은 시도의 `plan.updated` 뒤에 온다
+
+대표 상태 변화:
+
+- `created -> waiting_approval`
+- `created -> completed`
+- `waiting_approval -> completed`
+- `waiting_approval -> failed`
+
+## 8. 순서 불변식
+
+Lifecycle 이벤트 구현 후에는 아래 불변식을 지켜야 한다.
+
+1. `task.created`는 같은 trace 안에서 항상 최초다.
+2. `plan.drafted`는 첫 `step.ready`보다 먼저 온다.
+3. `policy.evaluated`는 같은 Step의 `action.started`보다 먼저 온다.
+4. `decision=require_approval`이면 같은 시도에서 `action.started`를 발행하지 않는다.
+5. `step.approval_requested` 뒤에는 반드시 `plan.updated`, `task.updated`가 따라온다.
+6. `step.denied` 뒤에는 Tool 실행 이벤트가 오지 않는다.
+7. `action.succeeded` 또는 `action.failed` 뒤에는 해당 Step 결과를 반영한 `plan.updated`, `task.updated`가 따라온다.
 2. `plan.drafted`
 3. `policy.evaluated` with `decision=require_approval`
 4. `step.approval_requested`

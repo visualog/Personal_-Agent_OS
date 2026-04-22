@@ -99,6 +99,16 @@ function isApprovalRequestedEvent(event: Event): event is Extract<Event, { event
   return event.event_type === "step.approval_requested";
 }
 
+function getEventIndexes(events: readonly Event[], eventType: string): number[] {
+  return events.reduce<number[]>((indexes, event, index) => {
+    if (event.event_type === eventType) {
+      indexes.push(index);
+    }
+
+    return indexes;
+  }, []);
+}
+
 test("orchestrator with medium write tool and no approval produces requires_approval step result", async () => {
   const gateway: OrchestratorToolGateway = {
     registerTool() {
@@ -147,6 +157,10 @@ test("orchestrator with medium write tool and no approval produces requires_appr
       (event) => isApprovalRequestedEvent(event) && Array.isArray(event.payload.risk_reasons),
     ),
   );
+  assert.equal(getEventIndexes(result.events, "step.ready").length, result.plan.steps.length);
+  assert.equal(getEventIndexes(result.events, "policy.evaluated").length, result.plan.steps.length);
+  assert.equal(getEventIndexes(result.events, "plan.updated").length, 1);
+  assert.equal(getEventIndexes(result.events, "task.updated").length, 1);
 });
 
 test("orchestrator with pre-approved custom gateway path can succeed when policy allows", async () => {
@@ -189,4 +203,8 @@ test("orchestrator with pre-approved custom gateway path can succeed when policy
   assert.equal(result.plan.status, "completed");
   assert.ok(result.steps.every((step) => step.step.status === "completed"));
   assert.ok(result.events.some((event) => event.event_type === "action.succeeded"));
+  assert.equal(getEventIndexes(result.events, "step.ready").length, result.plan.steps.length);
+  assert.equal(getEventIndexes(result.events, "policy.evaluated").length, result.plan.steps.length);
+  assert.equal(getEventIndexes(result.events, "plan.updated").length, 1);
+  assert.equal(getEventIndexes(result.events, "task.updated").length, 1);
 });

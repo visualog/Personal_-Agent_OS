@@ -1,3 +1,6 @@
+import type { PlanStatus, StepStatus, TaskStatus } from "./domain.js";
+import type { RiskLevel } from "./policy.js";
+
 export type Actor = "user" | "agent" | "system" | "tool";
 
 export const ACTORS = ["user", "agent", "system", "tool"] as const;
@@ -47,7 +50,11 @@ export type EventPayloadMap = {
     priority: "low" | "normal" | "high";
     sensitivity: "public" | "internal" | "personal" | "sensitive";
   };
-  "task.updated": Record<string, unknown>;
+  "task.updated": {
+    status: TaskStatus;
+    previous_status: TaskStatus;
+    summary: string;
+  };
   "plan.drafted": {
     plan_id: string;
     step_count: number;
@@ -59,8 +66,20 @@ export type EventPayloadMap = {
       critical: number;
     };
   };
-  "plan.updated": Record<string, unknown>;
-  "step.ready": Record<string, unknown>;
+  "plan.updated": {
+    plan_id: string;
+    status: PlanStatus;
+    previous_status: PlanStatus;
+    summary: string;
+  };
+  "step.ready": {
+    plan_id: string;
+    step_id: string;
+    tool_name: string;
+    status: Extract<StepStatus, "ready">;
+    risk_level: RiskLevel;
+    depends_on: string[];
+  };
   "step.approval_requested": {
     approval_id: string;
     step_id: string;

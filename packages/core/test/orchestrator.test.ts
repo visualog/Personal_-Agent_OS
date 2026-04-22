@@ -25,6 +25,16 @@ function getEventTypes(events: readonly Event[]): string[] {
   return events.map((event) => event.event_type);
 }
 
+function getEventIndexes(events: readonly Event[], eventType: string): number[] {
+  return events.reduce<number[]>((indexes, event, index) => {
+    if (event.event_type === eventType) {
+      indexes.push(index);
+    }
+
+    return indexes;
+  }, []);
+}
+
 test("run creates task and plan and executes workspace list/read successfully", async (t) => {
   const workspaceRoot = await createTempWorkspace();
   t.after(async () => {
@@ -70,8 +80,47 @@ test("event stream includes task.created, plan.drafted, action.started, action.s
 
   assert.ok(eventTypes.includes("task.created"));
   assert.ok(eventTypes.includes("plan.drafted"));
+  assert.ok(eventTypes.includes("step.ready"));
+  assert.ok(eventTypes.includes("policy.evaluated"));
   assert.ok(eventTypes.includes("action.started"));
   assert.ok(eventTypes.includes("action.succeeded"));
+  assert.ok(eventTypes.includes("plan.updated"));
+  assert.ok(eventTypes.includes("task.updated"));
+});
+
+test("run emits lifecycle projection events in a sane order before closing with plan/task updates", async (t) => {
+  const workspaceRoot = await createTempWorkspace();
+  t.after(async () => {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  });
+
+  const orchestrator = new PersonalAgentOrchestrator({
+    granted_capabilities: ["workspace.read"],
+  });
+
+  const result = await orchestrator.run({
+    raw_request: "List files and read the README.",
+    created_by: "user_02b",
+    workspaceRoot,
+  });
+
+  const eventTypes = getEventTypes(result.events);
+
+  const stepReadyIndexes = getEventIndexes(result.events, "step.ready");
+  const policyIndexes = getEventIndexes(result.events, "policy.evaluated");
+  const planUpdatedIndexes = getEventIndexes(result.events, "plan.updated");
+  const taskUpdatedIndexes = getEventIndexes(result.events, "task.updated");
+
+  assert.ok(eventTypes.includes("task.created"));
+  assert.ok(eventTypes.includes("plan.drafted"));
+  assert.equal(stepReadyIndexes.length, result.plan.steps.length);
+  assert.equal(policyIndexes.length, result.plan.steps.length);
+  assert.deepEqual(planUpdatedIndexes.length, 1);
+  assert.deepEqual(taskUpdatedIndexes.length, 1);
+  assert.ok(stepReadyIndexes[0]! > eventTypes.indexOf("plan.drafted"));
+  assert.ok(policyIndexes[0]! > stepReadyIndexes[0]!);
+  assert.ok(planUpdatedIndexes[0]! > policyIndexes.at(-1)!);
+  assert.ok(taskUpdatedIndexes[0]! > planUpdatedIndexes[0]!);
 });
 
 test("audit records are created for emitted events and redact payload object exists", async (t) => {
@@ -338,6 +387,64 @@ test("resumeApproval safely rejects unknown or already-terminal approvals withou
   assert.equal(gateway.getExecutions().length, executionsAfterApprove);
 });
 
+test("resumeApproval emits step.approved, step.ready, policy.evaluated, and final plan/task updates in order", async (t) => {
+  const workspaceRoot = await createTempWorkspace();
+  t.after(async () => {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  });
+
+  const gateway = createApprovalAwareGateway();
+  const orchestrator = new PersonalAgentOrchestrator({
+    granted_capabilities: ["workspace.read", "workspace.write"],
+    gateway,
+  });
+
+  const initial = await orchestrator.run({
+    raw_request: "Inspect the workspace and read the README.",
+    created_by: "user_resume_events",
+    workspaceRoot,
+  });
+
+  const pendingApproval = initial.approvals[0];
+  assert.ok(pendingApproval);
+
+  const resumed = await orchestrator.resumeApproval({
+    approval_id: pendingApproval!.id,
+    resolution: "approved",
+    task: initial.task,
+    plan: initial.plan,
+    workspaceRoot,
+  });
+
+  const initialEventCount = initial.events.length;
+  const resumeEvents = resumed.events.slice(initialEventCount);
+
+  assert.ok(resumeEvents.some((event) => event.event_type === "step.approved"));
+  assert.ok(resumeEvents.some((event) => event.event_type === "step.ready"));
+  assert.ok(resumeEvents.some((event) => event.event_type === "action.started"));
+  assert.ok(resumeEvents.some((event) => event.event_type === "action.succeeded"));
+  assert.equal(getEventIndexes(resumeEvents, "step.ready").length, 1);
+  assert.equal(getEventIndexes(resumeEvents, "policy.evaluated").length, 1);
+  assert.equal(getEventIndexes(resumeEvents, "plan.updated").length, 1);
+  assert.equal(getEventIndexes(resumeEvents, "task.updated").length, 1);
+
+  const approvedIndex = resumeEvents.findIndex((event) => event.event_type === "step.approved");
+  const readyIndex = resumeEvents.findIndex((event) => event.event_type === "step.ready");
+  const startedIndex = resumeEvents.findIndex((event) => event.event_type === "action.started");
+  const policyIndex = resumeEvents.findIndex((event) => event.event_type === "policy.evaluated");
+  const succeededIndex = resumeEvents.findIndex((event) => event.event_type === "action.succeeded");
+  const planUpdatedIndex = resumeEvents.findIndex((event) => event.event_type === "plan.updated");
+  const taskUpdatedIndex = resumeEvents.findIndex((event) => event.event_type === "task.updated");
+
+  assert.ok(approvedIndex >= 0);
+  assert.ok(readyIndex > approvedIndex);
+  assert.ok(startedIndex > readyIndex);
+  assert.ok(policyIndex > startedIndex);
+  assert.ok(succeededIndex > policyIndex);
+  assert.ok(planUpdatedIndex > succeededIndex);
+  assert.ok(taskUpdatedIndex > planUpdatedIndex);
+});
+
 test("run with approval pending marks task waiting_approval, plan partially_approved, and blocked step waiting_approval until resumed", async (t) => {
   const workspaceRoot = await createTempWorkspace();
   t.after(async () => {
@@ -358,6 +465,10 @@ test("run with approval pending marks task waiting_approval, plan partially_appr
 
   assert.equal(initial.task.status, "waiting_approval");
   assert.equal(initial.plan.status, "partially_approved");
+  assert.ok(initial.events.some((event) => event.event_type === "task.updated"));
+  assert.ok(initial.events.some((event) => event.event_type === "plan.updated"));
+  assert.ok(initial.events.filter((event) => event.event_type === "step.ready").length >= 2);
+  assert.ok(initial.events.some((event) => event.event_type === "policy.evaluated"));
   assert.deepEqual(
     initial.plan.steps.map((step) => step.status),
     ["completed", "waiting_approval"],
@@ -382,6 +493,9 @@ test("run with approval pending marks task waiting_approval, plan partially_appr
   assert.equal(resumed.approval?.status, "approved");
   assert.equal(resumed.task?.status, "completed");
   assert.equal(resumed.plan?.status, "completed");
+  assert.ok(resumed.events.some((event) => event.event_type === "step.approved"));
+  assert.ok(resumed.events.some((event) => event.event_type === "task.updated"));
+  assert.ok(resumed.events.some((event) => event.event_type === "plan.updated"));
   assert.equal(
     resumed.plan?.steps.find((step) => step.id === pendingApproval.step_id)?.status,
     "completed",

@@ -91,14 +91,22 @@ function summarizeEvent(event: Event): string {
   switch (event.event_type) {
     case "task.created":
       return `task created: ${event.payload.title}`;
+    case "task.updated":
+      return `task updated: ${event.payload.status}`;
     case "plan.drafted":
       return `plan drafted: ${event.payload.plan_id}`;
+    case "plan.updated":
+      return `plan updated: ${event.payload.status}`;
+    case "step.ready":
+      return `step ready: ${event.payload.step_id}`;
     case "step.approval_requested":
       return `approval requested: ${event.payload.approval_id}`;
     case "step.approved":
       return `approval approved: ${event.payload.approval_id}`;
     case "step.denied":
       return `approval denied: ${event.payload.approval_id}`;
+    case "policy.evaluated":
+      return `policy evaluated: ${event.payload.decision}`;
     case "action.started":
       return `action started: ${event.payload.tool_name}`;
     case "action.succeeded":
@@ -155,6 +163,12 @@ export class PersonalAgentOrchestrator {
 
     this.publishAndAudit(taskResult.event);
     this.publishAndAudit(planResult.event);
+    for (const step of planResult.plan.steps) {
+      this.publishAndAudit(this.createStepReadyEvent({
+        taskId: taskResult.task.id,
+        step,
+      }));
+    }
 
     const stepResults: OrchestratorStepResult[] = [];
     let listFilesOutput: unknown = undefined;
@@ -180,6 +194,13 @@ export class PersonalAgentOrchestrator {
         audit_available: true,
         sandbox_matched: true,
       });
+      if ("policy" in execution && execution.policy) {
+        this.publishAndAudit(this.createPolicyEvaluatedEvent({
+          taskId: taskResult.task.id,
+          step,
+          policy: execution.policy,
+        }));
+      }
 
       if (execution.status === "succeeded" && step.tool_name === "workspace.list_files") {
         listFilesOutput = execution.output;
@@ -227,6 +248,14 @@ export class PersonalAgentOrchestrator {
       finalizedSteps,
       input.now ?? new Date().toISOString(),
     );
+    this.publishAndAudit(this.createPlanUpdatedEvent({
+      previousStatus: planResult.plan.status,
+      plan: finalizedPlan,
+    }));
+    this.publishAndAudit(this.createTaskUpdatedEvent({
+      previousStatus: taskResult.task.status,
+      task: finalizedTask,
+    }));
 
     return {
       task: finalizedTask,
@@ -282,19 +311,30 @@ export class PersonalAgentOrchestrator {
           : step,
       );
 
+      const finalizedTask = withUpdatedTask(
+        input.task,
+        deniedSteps,
+        input.now ?? new Date().toISOString(),
+      );
+      const finalizedPlan = withUpdatedPlan(
+        input.plan,
+        deniedSteps,
+        input.now ?? new Date().toISOString(),
+      );
+      this.publishAndAudit(this.createPlanUpdatedEvent({
+        previousStatus: input.plan.status,
+        plan: finalizedPlan,
+      }));
+      this.publishAndAudit(this.createTaskUpdatedEvent({
+        previousStatus: input.task.status,
+        task: finalizedTask,
+      }));
+
       return {
         status: "resolved",
         approval: resolvedApproval,
-        task: withUpdatedTask(
-          input.task,
-          deniedSteps,
-          input.now ?? new Date().toISOString(),
-        ),
-        plan: withUpdatedPlan(
-          input.plan,
-          deniedSteps,
-          input.now ?? new Date().toISOString(),
-        ),
+        task: finalizedTask,
+        plan: finalizedPlan,
         events: this.eventBus.getEvents(),
         auditRecords: this.auditLog.getRecords(),
       };
@@ -303,6 +343,13 @@ export class PersonalAgentOrchestrator {
     this.publishAndAudit(this.createApprovalApprovedEvent({
       taskId: input.task.id,
       approval: resolvedApproval,
+    }));
+    this.publishAndAudit(this.createStepReadyEvent({
+      taskId: input.task.id,
+      step: {
+        ...step,
+        status: "ready",
+      },
     }));
 
     const stepResult = await this.executeStep({
@@ -319,21 +366,31 @@ export class PersonalAgentOrchestrator {
       ),
       [stepResult],
     );
+    const finalizedTask = withUpdatedTask(
+      input.task,
+      resumedSteps,
+      input.now ?? new Date().toISOString(),
+    );
+    const finalizedPlan = withUpdatedPlan(
+      input.plan,
+      resumedSteps,
+      input.now ?? new Date().toISOString(),
+    );
+    this.publishAndAudit(this.createPlanUpdatedEvent({
+      previousStatus: input.plan.status,
+      plan: finalizedPlan,
+    }));
+    this.publishAndAudit(this.createTaskUpdatedEvent({
+      previousStatus: input.task.status,
+      task: finalizedTask,
+    }));
 
     return {
       status: "resolved",
       approval: resolvedApproval,
       stepResult,
-      task: withUpdatedTask(
-        input.task,
-        resumedSteps,
-        input.now ?? new Date().toISOString(),
-      ),
-      plan: withUpdatedPlan(
-        input.plan,
-        resumedSteps,
-        input.now ?? new Date().toISOString(),
-      ),
+      task: finalizedTask,
+      plan: finalizedPlan,
       events: this.eventBus.getEvents(),
       auditRecords: this.auditLog.getRecords(),
     };
@@ -391,6 +448,13 @@ export class PersonalAgentOrchestrator {
       audit_available: true,
       sandbox_matched: true,
     });
+    if ("policy" in execution && execution.policy) {
+      this.publishAndAudit(this.createPolicyEvaluatedEvent({
+        taskId,
+        step,
+        policy: execution.policy,
+      }));
+    }
 
     const finishedEvent =
       execution.status === "succeeded"
@@ -447,6 +511,59 @@ export class PersonalAgentOrchestrator {
         tool_name: step.tool_name,
         idempotency_key: actionId,
         timeout_ms: 30_000,
+      },
+    };
+  }
+
+  private createStepReadyEvent({
+    taskId,
+    step,
+  }: {
+    taskId: string;
+    step: Step;
+  }): Event {
+    return {
+      event_id: `evt_${randomUUID()}`,
+      event_type: "step.ready",
+      timestamp: new Date().toISOString(),
+      actor: "agent",
+      task_id: taskId,
+      trace_id: `trace_${randomUUID()}`,
+      payload: {
+        plan_id: step.plan_id,
+        step_id: step.id,
+        tool_name: step.tool_name,
+        status: "ready",
+        risk_level: step.risk_level,
+        depends_on: [...step.depends_on],
+      },
+    };
+  }
+
+  private createPolicyEvaluatedEvent({
+    taskId,
+    step,
+    policy,
+  }: {
+    taskId: string;
+    step: Step;
+    policy: NonNullable<Extract<ToolExecutionResult, { policy: unknown }>["policy"]>;
+  }): Event {
+    return {
+      event_id: `evt_${randomUUID()}`,
+      event_type: "policy.evaluated",
+      timestamp: new Date().toISOString(),
+      actor: "system",
+      task_id: taskId,
+      trace_id: `trace_${randomUUID()}`,
+      payload: {
+        policy_decision_id: `pol_${randomUUID()}`,
+        step_id: step.id,
+        tool_name: step.tool_name,
+        decision: policy.decision,
+        risk_level: policy.risk_level,
+        required_capabilities: [...step.required_capabilities],
+        reasons: [...policy.reasons],
       },
     };
   }
@@ -560,6 +677,51 @@ export class PersonalAgentOrchestrator {
         step_id: approval.step_id,
         resolved_at: approval.resolved_at ?? new Date().toISOString(),
         summary: approval.summary,
+      },
+    };
+  }
+
+  private createTaskUpdatedEvent({
+    previousStatus,
+    task,
+  }: {
+    previousStatus: Task["status"];
+    task: Task;
+  }): Event {
+    return {
+      event_id: `evt_${randomUUID()}`,
+      event_type: "task.updated",
+      timestamp: task.updated_at,
+      actor: "agent",
+      task_id: task.id,
+      trace_id: `trace_${randomUUID()}`,
+      payload: {
+        status: task.status,
+        previous_status: previousStatus,
+        summary: `task status changed to ${task.status}`,
+      },
+    };
+  }
+
+  private createPlanUpdatedEvent({
+    previousStatus,
+    plan,
+  }: {
+    previousStatus: Plan["status"];
+    plan: Plan;
+  }): Event {
+    return {
+      event_id: `evt_${randomUUID()}`,
+      event_type: "plan.updated",
+      timestamp: plan.updated_at,
+      actor: "agent",
+      task_id: plan.task_id,
+      trace_id: `trace_${randomUUID()}`,
+      payload: {
+        plan_id: plan.id,
+        status: plan.status,
+        previous_status: previousStatus,
+        summary: `plan status changed to ${plan.status}`,
       },
     };
   }
