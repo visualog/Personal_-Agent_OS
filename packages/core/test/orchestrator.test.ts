@@ -42,10 +42,12 @@ test("run creates task and plan and executes workspace list/read successfully", 
   });
 
   assert.equal(result.task.title, "Please inspect the workspace and read the README.");
-  assert.equal(result.plan.status, "drafted");
+  assert.equal(result.task.status, "completed");
+  assert.equal(result.plan.status, "completed");
   assert.ok(result.steps.some((step) => step.step.tool_name === "workspace.list_files"));
   assert.ok(result.steps.some((step) => step.step.tool_name === "workspace.read_file"));
   assert.ok(result.steps.every((step) => step.execution.status === "succeeded"));
+  assert.ok(result.steps.every((step) => step.step.status === "completed"));
 });
 
 test("event stream includes task.created, plan.drafted, action.started, action.succeeded", async (t) => {
@@ -232,6 +234,12 @@ test("resumeApproval approves a pending step, emits step.approved, and re-execut
 
   assert.equal(resumed.status, "resolved");
   assert.equal(resumed.approval?.status, "approved");
+  assert.equal(resumed.task?.status, "completed");
+  assert.equal(resumed.plan?.status, "completed");
+  assert.equal(
+    resumed.plan?.steps.find((step) => step.id === pendingApproval.step_id)?.status,
+    "completed",
+  );
   assert.equal(resumed.stepResult?.execution.status, "succeeded");
   assert.ok(resumed.events.some((event) => event.event_type === "step.approved"));
   assert.ok(resumed.events.some((event) => event.event_type === "action.succeeded"));
@@ -270,6 +278,8 @@ test("resumeApproval denies a pending approval, emits step.denied, and does not 
 
   assert.equal(denied.status, "resolved");
   assert.equal(denied.approval?.status, "denied");
+  assert.equal(denied.task?.status, "failed");
+  assert.equal(denied.plan?.status, "failed");
   assert.equal(denied.stepResult, undefined);
   assert.ok(denied.events.some((event) => event.event_type === "step.denied"));
   assert.equal(gateway.getExecutions().length, executionsBeforeDeny);
@@ -326,4 +336,57 @@ test("resumeApproval safely rejects unknown or already-terminal approvals withou
   assert.equal(terminal.status, "already_resolved");
   assert.equal(terminal.approval?.status, "approved");
   assert.equal(gateway.getExecutions().length, executionsAfterApprove);
+});
+
+test("run with approval pending marks task waiting_approval, plan partially_approved, and blocked step waiting_approval until resumed", async (t) => {
+  const workspaceRoot = await createTempWorkspace();
+  t.after(async () => {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  });
+
+  const gateway = createApprovalAwareGateway();
+  const orchestrator = new PersonalAgentOrchestrator({
+    granted_capabilities: ["workspace.read", "workspace.write"],
+    gateway,
+  });
+
+  const initial = await orchestrator.run({
+    raw_request: "Inspect the workspace and read the README.",
+    created_by: "user_status_contract",
+    workspaceRoot,
+  });
+
+  assert.equal(initial.task.status, "waiting_approval");
+  assert.equal(initial.plan.status, "partially_approved");
+  assert.deepEqual(
+    initial.plan.steps.map((step) => step.status),
+    ["completed", "waiting_approval"],
+  );
+  assert.deepEqual(
+    initial.steps.map(({ execution }) => execution.status),
+    ["succeeded", "requires_approval"],
+  );
+
+  const pendingApproval = initial.approvals[0];
+  assert.ok(pendingApproval);
+
+  const resumed = await orchestrator.resumeApproval({
+    approval_id: pendingApproval!.id,
+    resolution: "approved",
+    task: initial.task,
+    plan: initial.plan,
+    workspaceRoot,
+  });
+
+  assert.equal(resumed.status, "resolved");
+  assert.equal(resumed.approval?.status, "approved");
+  assert.equal(resumed.task?.status, "completed");
+  assert.equal(resumed.plan?.status, "completed");
+  assert.equal(
+    resumed.plan?.steps.find((step) => step.id === pendingApproval.step_id)?.status,
+    "completed",
+  );
+  assert.equal(resumed.stepResult?.execution.status, "succeeded");
+  assert.equal(initial.task.status, "waiting_approval");
+  assert.equal(initial.plan.status, "partially_approved");
 });

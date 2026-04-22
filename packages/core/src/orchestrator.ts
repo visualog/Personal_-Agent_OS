@@ -18,6 +18,11 @@ import {
   type TaskIntakeResult,
 } from "./task-intake.js";
 import {
+  applyStepResults,
+  withUpdatedPlan,
+  withUpdatedTask,
+} from "./status.js";
+import {
   InMemoryToolGateway,
   type ToolGatewayTool,
   type ToolExecutionResult,
@@ -71,6 +76,8 @@ export interface ResolveApprovalInput {
 export interface ResolveApprovalResult {
   status: "resolved" | "not_found" | "already_resolved" | "step_not_found";
   approval: Approval | null;
+  task?: Task;
+  plan?: Plan;
   stepResult?: OrchestratorStepResult;
   events: readonly Event[];
   auditRecords: readonly AuditRecord[];
@@ -209,11 +216,26 @@ export class PersonalAgentOrchestrator {
       stepResults.push({ step, execution });
     }
 
+    const finalizedSteps = applyStepResults(planResult.plan.steps, stepResults);
+    const finalizedPlan = withUpdatedPlan(
+      planResult.plan,
+      finalizedSteps,
+      input.now ?? new Date().toISOString(),
+    );
+    const finalizedTask = withUpdatedTask(
+      taskResult.task,
+      finalizedSteps,
+      input.now ?? new Date().toISOString(),
+    );
+
     return {
-      task: taskResult.task,
-      plan: planResult.plan,
+      task: finalizedTask,
+      plan: finalizedPlan,
       approvals: this.approvalStore.list(),
-      steps: stepResults,
+      steps: stepResults.map((result) => ({
+        step: finalizedSteps.find((step) => step.id === result.step.id) ?? result.step,
+        execution: result.execution,
+      })),
       events: this.eventBus.getEvents(),
       auditRecords: this.auditLog.getRecords(),
     };
@@ -254,9 +276,25 @@ export class PersonalAgentOrchestrator {
         approval: resolvedApproval,
       }));
 
+      const deniedSteps = input.plan.steps.map((step) =>
+        step.id === resolvedApproval.step_id
+          ? { ...step, status: "blocked" as const }
+          : step,
+      );
+
       return {
         status: "resolved",
         approval: resolvedApproval,
+        task: withUpdatedTask(
+          input.task,
+          deniedSteps,
+          input.now ?? new Date().toISOString(),
+        ),
+        plan: withUpdatedPlan(
+          input.plan,
+          deniedSteps,
+          input.now ?? new Date().toISOString(),
+        ),
         events: this.eventBus.getEvents(),
         auditRecords: this.auditLog.getRecords(),
       };
@@ -275,10 +313,27 @@ export class PersonalAgentOrchestrator {
       approvalGranted: true,
     });
 
+    const resumedSteps = applyStepResults(
+      input.plan.steps.map((candidate) =>
+        candidate.id === step.id ? { ...candidate, status: "running" as const } : candidate,
+      ),
+      [stepResult],
+    );
+
     return {
       status: "resolved",
       approval: resolvedApproval,
       stepResult,
+      task: withUpdatedTask(
+        input.task,
+        resumedSteps,
+        input.now ?? new Date().toISOString(),
+      ),
+      plan: withUpdatedPlan(
+        input.plan,
+        resumedSteps,
+        input.now ?? new Date().toISOString(),
+      ),
       events: this.eventBus.getEvents(),
       auditRecords: this.auditLog.getRecords(),
     };

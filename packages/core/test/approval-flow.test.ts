@@ -139,6 +139,9 @@ test("orchestrator with medium write tool and no approval produces requires_appr
   assert.equal(result.approvals.length, 1);
   assert.equal(result.approvals[0]?.status, "requested");
   assert.ok(result.approvals[0]?.summary.includes("승인 필요"));
+  assert.equal(result.task.status, "waiting_approval");
+  assert.equal(result.plan.status, "partially_approved");
+  assert.ok(result.steps.some((step) => step.step.status === "waiting_approval"));
   assert.ok(
     result.events.some(
       (event) => isApprovalRequestedEvent(event) && Array.isArray(event.payload.risk_reasons),
@@ -182,5 +185,8 @@ test("orchestrator with pre-approved custom gateway path can succeed when policy
 
   assert.ok(result.steps.length > 0);
   assert.ok(result.steps.every((step) => step.execution.status === "succeeded"));
+  assert.equal(result.task.status, "completed");
+  assert.equal(result.plan.status, "completed");
+  assert.ok(result.steps.every((step) => step.step.status === "completed"));
   assert.ok(result.events.some((event) => event.event_type === "action.succeeded"));
 });
