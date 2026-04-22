@@ -15,3 +15,4 @@ export * from "./approval-store.js";
 export * from "./status.js";
 export * from "./state-store.js";
 export * from "./read-model.js";
+export * from "./memory-api.js";

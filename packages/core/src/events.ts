@@ -21,6 +21,7 @@ export type EventType =
   | "risk.flagged"
   | "memory.read"
   | "memory.written"
+  | "memory.deleted"
   | "audit.recorded";
 
 export const EVENT_TYPES = [
@@ -39,6 +40,7 @@ export const EVENT_TYPES = [
   "risk.flagged",
   "memory.read",
   "memory.written",
+  "memory.deleted",
   "audit.recorded",
 ] as const;
 
@@ -142,13 +144,27 @@ export type EventPayloadMap = {
     deny_reasons: string[];
     summary: string;
   };
-  "memory.read": Record<string, unknown>;
+  "memory.read": {
+    query: string;
+    purpose: string;
+    task_context: string;
+    result_count: number;
+    allowed_scopes: Array<"ephemeral" | "project" | "personal" | "sensitive" | "blocked">;
+  };
   "memory.written": {
     memory_id: string;
     memory_class: "ephemeral" | "project" | "personal" | "sensitive" | "blocked";
     source_task_id: string;
     retention: "session" | "project" | "30d" | "permanent";
     redacted: boolean;
+    decision: "stored" | "blocked";
+    reason: string;
+  };
+  "memory.deleted": {
+    memory_id: string;
+    source_task_id: string;
+    reason: string;
+    deleted: true;
   };
   "audit.recorded": Record<string, unknown>;
 };
