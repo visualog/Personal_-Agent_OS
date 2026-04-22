@@ -540,6 +540,16 @@ export async function getCommandCenterDemoRuntime(): Promise<CommandCenterDemoRu
   return runtimePromise;
 }
 
+export async function resetCommandCenterDemoRuntime(): Promise<CommandCenterDemoRuntime> {
+  if (runtimePromise !== null) {
+    const existingRuntime = await runtimePromise;
+    await existingRuntime.dispose();
+  }
+
+  runtimePromise = null;
+  return getCommandCenterDemoRuntime();
+}
+
 export async function generateDemoState(): Promise<GeneratedCommandCenterState> {
   const runtime = await getCommandCenterDemoRuntime();
   return runtime.getSnapshot();

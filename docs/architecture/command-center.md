@@ -98,6 +98,7 @@ task detail은 아래를 한 번에 연결해서 보여줘야 한다.
 로컬 `dev:web` 환경에서는 추가로 다음 API를 제공한다.
 
 - `GET /api/command-center/state`
+- `POST /api/command-center/reset`
 - `POST /api/command-center/approvals/:id`
 
 현재 실제로 orchestrator approval flow와 연결된 액션:
@@ -111,6 +112,8 @@ task detail은 아래를 한 번에 연결해서 보여줘야 한다.
 
 - `request_changes`는 dev runtime의 review-note layer에서 동작하며, approval 상태는 `requested`로 유지된다.
 - `cancel_task`는 pending approval을 `expired`로 닫고 task/plan을 `canceled`로 전환한다.
+- `tests/ui/command-center-ui.test.ts`는 위 4개 action의 브라우저 회귀 경로를 검증한다.
+- UI 회귀 테스트는 dev preview를 새로 띄우지 않고, 실행 중인 preview에 `reset` API를 호출해 상태를 초기화한다.
 
 ## 6. 수용 기준
 

@@ -1,7 +1,10 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import type { Connect } from 'vite';
-import { getCommandCenterDemoRuntime } from './scripts/command-center-demo-runtime.js';
+import {
+  getCommandCenterDemoRuntime,
+  resetCommandCenterDemoRuntime,
+} from './scripts/command-center-demo-runtime.js';
 
 function readRequestBody(req: Connect.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -23,6 +26,14 @@ function commandCenterDemoApiPlugin() {
 
         if (req.method === 'GET' && pathname === '/api/command-center/state') {
           const runtime = await getCommandCenterDemoRuntime();
+          const snapshot = await runtime.getSnapshot();
+          res.setHeader('content-type', 'application/json');
+          res.end(JSON.stringify(snapshot));
+          return;
+        }
+
+        if (req.method === 'POST' && pathname === '/api/command-center/reset') {
+          const runtime = await resetCommandCenterDemoRuntime();
           const snapshot = await runtime.getSnapshot();
           res.setHeader('content-type', 'application/json');
           res.end(JSON.stringify(snapshot));

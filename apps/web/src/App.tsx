@@ -78,6 +78,7 @@ function TaskList({
               key={item.id}
               className={`task-row${isSelected ? ' selected' : ''}`}
               type="button"
+              data-testid={`task-row-${item.id}`}
               onClick={() => onSelect(item.id)}
             >
               <div className="task-row-top">
@@ -130,6 +131,7 @@ function ApprovalQueueList({
             <article
               key={item.id}
               className={`approval-item${selectedTaskId === item.task_id ? ' selected' : ''}`}
+              data-testid={`approval-item-${item.id}`}
             >
               <button
                 type="button"
@@ -152,6 +154,8 @@ function ApprovalQueueList({
                       key={action}
                       type="button"
                       className={`action-button action-${typedAction}`}
+                      data-testid={`approval-action-${typedAction}-${item.id}`}
+                      data-action={typedAction}
                       onClick={() => onAction(item, typedAction)}
                       disabled={busyApprovalId === item.id}
                     >
@@ -280,16 +284,18 @@ function ApprovalList({
 
 function Overview({ detail }: { detail: TaskDetailView }) {
   return (
-    <section className="overview-band" aria-label="Task Overview">
+    <section className="overview-band" aria-label="Task Overview" data-testid="task-overview">
       <div>
         <p className="eyebrow">Selected Task</p>
-        <h1>{detail.task.title}</h1>
-        <p className="overview-copy">{detail.task.summary}</p>
+        <h1 data-testid="selected-task-title">{detail.task.title}</h1>
+        <p className="overview-copy" data-testid="selected-task-summary">{detail.task.summary}</p>
       </div>
       <div className="overview-metrics" role="list" aria-label="Task metrics">
         <div className="metric">
           <span>Status</span>
-          <strong>{statusLabels[detail.task.status] ?? detail.task.status}</strong>
+          <strong data-testid="selected-task-status">
+            {statusLabels[detail.task.status] ?? detail.task.status}
+          </strong>
         </div>
         <div className="metric">
           <span>Approvals</span>
@@ -412,7 +418,7 @@ export default function App() {
   return (
       <div className="app-shell">
       <main className="dashboard">
-        <section className="panel runtime-banner" aria-label="Runtime mode">
+        <section className="panel runtime-banner" aria-label="Runtime mode" data-testid="runtime-banner">
           <div className="panel-heading">
             <div>
               <p className="eyebrow">Runtime</p>
@@ -423,7 +429,7 @@ export default function App() {
             </span>
           </div>
           <div className="section-body">
-            <p className="overview-copy">{bannerMessage}</p>
+            <p className="overview-copy" data-testid="runtime-banner-message">{bannerMessage}</p>
           </div>
         </section>
 

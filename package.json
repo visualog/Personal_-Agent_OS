@@ -11,10 +11,13 @@
     "prebuild:web": "npm run generate:web-demo",
     "build:web": "vite build",
     "check": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test --import tsx packages/core/test/*.test.ts"
+    "test": "node --test --import tsx packages/core/test/*.test.ts",
+    "test:ui": "node --test --test-concurrency=1 --import tsx tests/ui/*.test.ts",
+    "test:mvp": "npm test && npm run test:ui"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
+    "playwright": "^1.59.1",
     "tsx": "^4.20.0",
     "typescript": "^5.8.0"
   },

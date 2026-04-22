@@ -24,9 +24,18 @@ This UI is fed by a runtime-backed demo snapshot generated from the core orchest
 When the Vite dev server is running, the preview also exposes a thin local API for:
 
 - `GET /api/command-center/state`
+- `POST /api/command-center/reset`
 - `POST /api/command-center/approvals/:id`
 
-That means the approval queue in local preview now runs through the actual orchestrator approval flow for `approve` and `deny`.
+That means the approval queue in local preview now runs through the actual orchestrator approval flow for `approve`, `deny`, and `cancel_task`, while `request_changes` records a live review note and keeps the approval pending.
+
+The repository also includes an MVP close-out checklist and exit criteria:
+
+- [MVP Exit Criteria](docs/issues/mvp-exit-criteria.md)
+
+And a browser-level regression command for the Command Center preview:
+
+- `npm run test:ui` (with `dev:web` running)
 
 ## Repository Layout
 
