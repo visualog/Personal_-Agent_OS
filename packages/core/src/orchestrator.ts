@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
 
+import type { ApprovalStore } from "./approval-store.js";
+import { InMemoryApprovalStore } from "./approval-store.js";
 import type { AuditLog } from "./audit-log.js";
 import { InMemoryAuditLog } from "./audit-log.js";
 import type { EventBus } from "./event-bus.js";
 import { InMemoryEventBus } from "./event-bus.js";
-import type { AuditRecord, Plan, Step, Task } from "./domain.js";
+import type { Approval, AuditRecord, Plan, Step, Task } from "./domain.js";
 import type { Event } from "./events.js";
 import type { Capability } from "./policy.js";
 import {
@@ -17,7 +19,9 @@ import {
 } from "./task-intake.js";
 import {
   InMemoryToolGateway,
+  type ToolGatewayTool,
   type ToolExecutionResult,
+  type ToolExecutionRequest,
 } from "./tool-gateway.js";
 import { createWorkspaceToolGatewayTools } from "./workspace-tools.js";
 
@@ -29,9 +33,10 @@ export interface RunTaskInput {
 }
 
 export interface OrchestratorDependencies {
+  approvalStore?: ApprovalStore;
   eventBus?: EventBus;
   auditLog?: AuditLog;
-  gateway?: InMemoryToolGateway;
+  gateway?: OrchestratorToolGateway;
   granted_capabilities?: readonly Capability[];
 }
 
@@ -43,9 +48,15 @@ export interface OrchestratorStepResult {
 export interface OrchestratorRunResult {
   task: Task;
   plan: Plan;
+  approvals: readonly Approval[];
   steps: readonly OrchestratorStepResult[];
   events: readonly Event[];
   auditRecords: readonly AuditRecord[];
+}
+
+export interface OrchestratorToolGateway {
+  registerTool(tool: ToolGatewayTool): void;
+  execute(request: ToolExecutionRequest): Promise<ToolExecutionResult>;
 }
 
 function createActionId(): string {
@@ -58,6 +69,8 @@ function summarizeEvent(event: Event): string {
       return `task created: ${event.payload.title}`;
     case "plan.drafted":
       return `plan drafted: ${event.payload.plan_id}`;
+    case "step.approval_requested":
+      return `approval requested: ${event.payload.approval_id}`;
     case "action.started":
       return `action started: ${event.payload.tool_name}`;
     case "action.succeeded":
@@ -77,16 +90,22 @@ function createAuditLog(auditLog?: AuditLog): AuditLog {
   return auditLog ?? new InMemoryAuditLog();
 }
 
+function createApprovalStore(approvalStore?: ApprovalStore): ApprovalStore {
+  return approvalStore ?? new InMemoryApprovalStore();
+}
+
 export class PersonalAgentOrchestrator {
   private readonly eventBus: EventBus;
   private readonly auditLog: AuditLog;
-  private readonly gateway: InMemoryToolGateway;
+  private readonly approvalStore: ApprovalStore;
+  private readonly gateway: OrchestratorToolGateway;
   private readonly grantedCapabilities: readonly Capability[];
   private readonly ownsGateway: boolean;
 
   constructor(dependencies: OrchestratorDependencies = {}) {
     this.eventBus = createEventBus(dependencies.eventBus);
     this.auditLog = createAuditLog(dependencies.auditLog);
+    this.approvalStore = createApprovalStore(dependencies.approvalStore);
     this.ownsGateway = dependencies.gateway === undefined;
     this.gateway = dependencies.gateway ?? new InMemoryToolGateway();
     this.grantedCapabilities = dependencies.granted_capabilities ?? ["workspace.read"];
@@ -150,12 +169,24 @@ export class PersonalAgentOrchestrator {
               taskId: taskResult.task.id,
               output: execution.output,
             })
-          : this.createActionFailedEvent({
-              actionId,
-              step,
-              taskId: taskResult.task.id,
-              execution,
-            });
+          : execution.status === "requires_approval"
+            ? this.createApprovalRequestedEvent({
+                taskId: taskResult.task.id,
+                step,
+                approval: this.approvalStore.create({
+                  task_id: taskResult.task.id,
+                  step_id: step.id,
+                  summary: `${step.title} 승인 필요`,
+                  risk_reasons: execution.policy?.reasons ?? [],
+                  requested_at: input.now,
+                }),
+              })
+            : this.createActionFailedEvent({
+                actionId,
+                step,
+                taskId: taskResult.task.id,
+                execution,
+              });
 
       this.publishAndAudit(finishedEvent);
       stepResults.push({ step, execution });
@@ -164,6 +195,7 @@ export class PersonalAgentOrchestrator {
     return {
       task: taskResult.task,
       plan: planResult.plan,
+      approvals: this.approvalStore.list(),
       steps: stepResults,
       events: this.eventBus.getEvents(),
       auditRecords: this.auditLog.getRecords(),
@@ -261,6 +293,32 @@ export class PersonalAgentOrchestrator {
         error_code: errorCode,
         retryable: execution.status === "failed",
         summary: `action ${execution.status}`,
+      },
+    };
+  }
+
+  private createApprovalRequestedEvent({
+    taskId,
+    step,
+    approval,
+  }: {
+    taskId: string;
+    step: Step;
+    approval: Approval;
+  }): Event {
+    return {
+      event_id: `evt_${randomUUID()}`,
+      event_type: "step.approval_requested",
+      timestamp: approval.requested_at,
+      actor: "system",
+      task_id: taskId,
+      trace_id: `trace_${randomUUID()}`,
+      payload: {
+        approval_id: approval.id,
+        step_id: step.id,
+        summary: approval.summary,
+        risk_reasons: [...approval.risk_reasons],
+        expires_at: "",
       },
     };
   }

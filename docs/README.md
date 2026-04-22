@@ -14,6 +14,7 @@
 - [Orchestrator Runtime](architecture/orchestrator-runtime.md): Task부터 Tool 실행과 Audit까지 묶는 런타임 계약
 - [Policy and Permissions](security/policy-and-permissions.md): 위험도, capability, 승인 정책
 - [Policy Engine Runtime](security/policy-engine-runtime.md): `evaluatePolicy` 입력과 판정 규칙
+- [Approval Flow Runtime](security/approval-flow-runtime.md): 승인 요청 저장과 상태 전이 계약
 - [Memory Privacy](security/memory-privacy.md): 메모리 분류와 민감정보 처리
 - [MVP Backlog](issues/mvp-backlog.md): GitHub Issue로 옮길 작업 목록
 - [Issue Template](issues/issue-template.md): 이슈 작성 템플릿
