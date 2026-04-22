@@ -9,17 +9,17 @@ The first project artifact is an issue-ready MVP plan, now split into implementa
 
 ## Current Status
 
-Draft planning has started. The documentation set defines:
+The core runtime, trust controls, regression coverage, and Command Center view model are implemented.
 
-- product boundaries and non-goals
-- representative scenarios
-- core runtime components
-- domain models
-- event contracts
-- risk and permission policy
-- GitHub issue backlog
-- parallel work lanes
-- milestone sequencing
+The repository now also includes a first runnable web prototype at `apps/web` that presents:
+
+- task list
+- approval queue
+- task detail
+- risk flags
+- timeline and audit records
+
+This first UI uses mocked Command Center data so we can stabilize the information architecture before wiring live runtime state into the browser.
 
 ## Repository Layout
 

@@ -3,6 +3,7 @@
 
 # Node
 node_modules/
+dist-web/
 dist/
 build/
 .next/
@@ -25,4 +26,3 @@ data/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
-
