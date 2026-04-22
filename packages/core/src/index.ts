@@ -6,3 +6,5 @@ export * from "./policy.js";
 export * from "./policy-engine.js";
 export * from "./tool-registry.js";
 export * from "./tool-gateway.js";
+export * from "./workspace-scope.js";
+export * from "./workspace-tools.js";

@@ -9,6 +9,7 @@
 - [Glossary](architecture/glossary.md): 구현과 이슈 작성에 쓰는 공통 용어
 - [Events](architecture/events.md): 내부 이벤트 계약과 payload 기준
 - [Tool Runtime](architecture/tool-runtime.md): Tool Registry와 Tool Gateway 런타임 계약
+- [Workspace Tools](architecture/workspace-tools.md): 읽기 전용 workspace 도구 계약
 - [Policy and Permissions](security/policy-and-permissions.md): 위험도, capability, 승인 정책
 - [Policy Engine Runtime](security/policy-engine-runtime.md): `evaluatePolicy` 입력과 판정 규칙
 - [Memory Privacy](security/memory-privacy.md): 메모리 분류와 민감정보 처리
