@@ -59,6 +59,23 @@ export interface OrchestratorToolGateway {
   execute(request: ToolExecutionRequest): Promise<ToolExecutionResult>;
 }
 
+export interface ResolveApprovalInput {
+  approval_id: string;
+  resolution: "approved" | "denied" | "expired";
+  task: Task;
+  plan: Plan;
+  workspaceRoot: string;
+  now?: string;
+}
+
+export interface ResolveApprovalResult {
+  status: "resolved" | "not_found" | "already_resolved" | "step_not_found";
+  approval: Approval | null;
+  stepResult?: OrchestratorStepResult;
+  events: readonly Event[];
+  auditRecords: readonly AuditRecord[];
+}
+
 function createActionId(): string {
   return `action_${randomUUID()}`;
 }
@@ -71,6 +88,10 @@ function summarizeEvent(event: Event): string {
       return `plan drafted: ${event.payload.plan_id}`;
     case "step.approval_requested":
       return `approval requested: ${event.payload.approval_id}`;
+    case "step.approved":
+      return `approval approved: ${event.payload.approval_id}`;
+    case "step.denied":
+      return `approval denied: ${event.payload.approval_id}`;
     case "action.started":
       return `action started: ${event.payload.tool_name}`;
     case "action.succeeded":
@@ -112,11 +133,7 @@ export class PersonalAgentOrchestrator {
   }
 
   async run(input: RunTaskInput): Promise<OrchestratorRunResult> {
-    if (this.ownsGateway) {
-      for (const tool of createWorkspaceToolGatewayTools({ root: input.workspaceRoot })) {
-        this.gateway.registerTool(tool);
-      }
-    }
+    this.ensureWorkspaceTools(input.workspaceRoot);
 
     const taskResult: TaskIntakeResult = createTask({
       raw_request: input.raw_request,
@@ -202,9 +219,155 @@ export class PersonalAgentOrchestrator {
     };
   }
 
+  async resolveApproval(input: ResolveApprovalInput): Promise<ResolveApprovalResult> {
+    this.ensureWorkspaceTools(input.workspaceRoot);
+
+    const resolvedApproval = this.approvalStore.resolve(
+      input.approval_id,
+      input.resolution,
+      input.now,
+    );
+
+    if (resolvedApproval === null) {
+      const currentApproval = this.approvalStore.get(input.approval_id);
+      return {
+        status: currentApproval ? "already_resolved" : "not_found",
+        approval: currentApproval,
+        events: this.eventBus.getEvents(),
+        auditRecords: this.auditLog.getRecords(),
+      };
+    }
+
+    const step = input.plan.steps.find((candidate) => candidate.id === resolvedApproval.step_id);
+    if (!step) {
+      return {
+        status: "step_not_found",
+        approval: resolvedApproval,
+        events: this.eventBus.getEvents(),
+        auditRecords: this.auditLog.getRecords(),
+      };
+    }
+
+    if (input.resolution !== "approved") {
+      this.publishAndAudit(this.createApprovalDeniedEvent({
+        taskId: input.task.id,
+        approval: resolvedApproval,
+      }));
+
+      return {
+        status: "resolved",
+        approval: resolvedApproval,
+        events: this.eventBus.getEvents(),
+        auditRecords: this.auditLog.getRecords(),
+      };
+    }
+
+    this.publishAndAudit(this.createApprovalApprovedEvent({
+      taskId: input.task.id,
+      approval: resolvedApproval,
+    }));
+
+    const stepResult = await this.executeStep({
+      step,
+      taskId: input.task.id,
+      workspaceRoot: input.workspaceRoot,
+      listFilesOutput: undefined,
+      approvalGranted: true,
+    });
+
+    return {
+      status: "resolved",
+      approval: resolvedApproval,
+      stepResult,
+      events: this.eventBus.getEvents(),
+      auditRecords: this.auditLog.getRecords(),
+    };
+  }
+
+  async resumeApproval(input: ResolveApprovalInput): Promise<ResolveApprovalResult> {
+    return this.resolveApproval(input);
+  }
+
   private publishAndAudit(event: Event): void {
     this.eventBus.publish(event);
     this.auditLog.recordEvent(event, summarizeEvent(event));
+  }
+
+  private ensureWorkspaceTools(workspaceRoot: string): void {
+    if (!this.ownsGateway) {
+      return;
+    }
+
+    for (const tool of createWorkspaceToolGatewayTools({ root: workspaceRoot })) {
+      this.gateway.registerTool(tool);
+    }
+  }
+
+  private async executeStep({
+    step,
+    taskId,
+    workspaceRoot,
+    listFilesOutput,
+    approvalGranted,
+  }: {
+    step: Step;
+    taskId: string;
+    workspaceRoot: string;
+    listFilesOutput: unknown;
+    approvalGranted: boolean;
+  }): Promise<OrchestratorStepResult> {
+    const actionId = createActionId();
+    const startedEvent = this.createActionStartedEvent({
+      actionId,
+      step,
+      taskId,
+    });
+    this.publishAndAudit(startedEvent);
+
+    const executionInput = this.buildExecutionInput(step, listFilesOutput, workspaceRoot);
+    const execution = await this.gateway.execute({
+      action_id: actionId,
+      step_id: step.id,
+      tool_name: step.tool_name,
+      input: executionInput,
+      granted_capabilities: this.grantedCapabilities,
+      scope_allowed: true,
+      approval_granted: approvalGranted,
+      audit_available: true,
+      sandbox_matched: true,
+    });
+
+    const finishedEvent =
+      execution.status === "succeeded"
+        ? this.createActionSucceededEvent({
+            actionId,
+            step,
+            taskId,
+            output: execution.output,
+          })
+        : execution.status === "requires_approval"
+          ? this.createApprovalRequestedEvent({
+              taskId,
+              step,
+              approval:
+                this.approvalStore.findPendingByStep(taskId, step.id) ??
+                this.approvalStore.create({
+                  task_id: taskId,
+                  step_id: step.id,
+                  summary: `${step.title} 승인 필요`,
+                  risk_reasons: execution.policy?.reasons ?? [],
+                }),
+            })
+          : this.createActionFailedEvent({
+              actionId,
+              step,
+              taskId,
+              execution,
+            });
+
+    this.publishAndAudit(finishedEvent);
+
+    return { step, execution };
   }
 
   private createActionStartedEvent({
@@ -319,6 +482,52 @@ export class PersonalAgentOrchestrator {
         summary: approval.summary,
         risk_reasons: [...approval.risk_reasons],
         expires_at: "",
+      },
+    };
+  }
+
+  private createApprovalApprovedEvent({
+    taskId,
+    approval,
+  }: {
+    taskId: string;
+    approval: Approval;
+  }): Event {
+    return {
+      event_id: `evt_${randomUUID()}`,
+      event_type: "step.approved",
+      timestamp: approval.resolved_at ?? new Date().toISOString(),
+      actor: "user",
+      task_id: taskId,
+      trace_id: `trace_${randomUUID()}`,
+      payload: {
+        approval_id: approval.id,
+        step_id: approval.step_id,
+        resolved_at: approval.resolved_at ?? new Date().toISOString(),
+        summary: approval.summary,
+      },
+    };
+  }
+
+  private createApprovalDeniedEvent({
+    taskId,
+    approval,
+  }: {
+    taskId: string;
+    approval: Approval;
+  }): Event {
+    return {
+      event_id: `evt_${randomUUID()}`,
+      event_type: "step.denied",
+      timestamp: approval.resolved_at ?? new Date().toISOString(),
+      actor: "user",
+      task_id: taskId,
+      trace_id: `trace_${randomUUID()}`,
+      payload: {
+        approval_id: approval.id,
+        step_id: approval.step_id,
+        resolved_at: approval.resolved_at ?? new Date().toISOString(),
+        summary: approval.summary,
       },
     };
   }

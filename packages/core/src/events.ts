@@ -68,8 +68,18 @@ export type EventPayloadMap = {
     risk_reasons: string[];
     expires_at: string;
   };
-  "step.approved": Record<string, unknown>;
-  "step.denied": Record<string, unknown>;
+  "step.approved": {
+    approval_id: string;
+    step_id: string;
+    resolved_at: string;
+    summary: string;
+  };
+  "step.denied": {
+    approval_id: string;
+    step_id: string;
+    resolved_at: string;
+    summary: string;
+  };
   "action.started": {
     action_id: string;
     step_id: string;

@@ -7,6 +7,8 @@ import test from "node:test";
 import {
   PersonalAgentOrchestrator,
   type Event,
+  type OrchestratorToolGateway,
+  evaluatePolicy,
 } from "../src/index.js";
 
 async function createTempWorkspace(): Promise<string> {
@@ -123,4 +125,205 @@ test("with granted_capabilities [] the run produces at least one denied/failed e
   assert.ok(
     !result.steps.every(({ execution }) => execution.status === "succeeded"),
   );
+});
+
+function createApprovalAwareGateway(): OrchestratorToolGateway & { getExecutions(): readonly string[] } {
+  const executions: string[] = [];
+
+  return {
+    registerTool() {
+      return undefined;
+    },
+    async execute(request) {
+      executions.push(`${request.tool_name}:${request.approval_granted === true ? "approved" : "initial"}`);
+
+      if (request.tool_name === "workspace.list_files") {
+        return {
+          status: "succeeded" as const,
+          output: { entries: [{ path: "README.md", type: "file" }] },
+          policy: evaluatePolicy({
+            id: request.action_id,
+            step_id: request.step_id,
+            tool_name: request.tool_name,
+            requested_capabilities: ["workspace.read"],
+            granted_capabilities: request.granted_capabilities,
+            risk_level: "low",
+            scope_allowed: request.scope_allowed,
+            approval_granted: request.approval_granted,
+            audit_available: request.audit_available,
+            tool_registered: true,
+            sandbox_matched: request.sandbox_matched,
+          }),
+        };
+      }
+
+      if (request.tool_name === "workspace.read_file" && request.approval_granted !== true) {
+        return {
+          status: "requires_approval" as const,
+          policy: evaluatePolicy({
+            id: request.action_id,
+            step_id: request.step_id,
+            tool_name: request.tool_name,
+            requested_capabilities: ["workspace.write"],
+            granted_capabilities: ["workspace.write"],
+            risk_level: "medium",
+            scope_allowed: request.scope_allowed,
+            approval_granted: request.approval_granted,
+            audit_available: request.audit_available,
+            tool_registered: true,
+            sandbox_matched: request.sandbox_matched,
+          }),
+        };
+      }
+
+      return {
+        status: "succeeded" as const,
+        output: { ok: true, input: request.input },
+        policy: evaluatePolicy({
+          id: request.action_id,
+          step_id: request.step_id,
+          tool_name: request.tool_name,
+          requested_capabilities: ["workspace.write"],
+          granted_capabilities: ["workspace.write"],
+          risk_level: "medium",
+          scope_allowed: request.scope_allowed,
+          approval_granted: true,
+          audit_available: request.audit_available,
+          tool_registered: true,
+          sandbox_matched: request.sandbox_matched,
+        }),
+      };
+    },
+    getExecutions() {
+      return executions;
+    },
+  };
+}
+
+test("resumeApproval approves a pending step, emits step.approved, and re-executes the blocked tool successfully", async (t) => {
+  const workspaceRoot = await createTempWorkspace();
+  t.after(async () => {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  });
+
+  const gateway = createApprovalAwareGateway();
+  const orchestrator = new PersonalAgentOrchestrator({
+    granted_capabilities: ["workspace.read", "workspace.write"],
+    gateway,
+  });
+
+  const initial = await orchestrator.run({
+    raw_request: "Inspect the workspace and read the README.",
+    created_by: "user_approval_resume",
+    workspaceRoot,
+  });
+
+  const pendingApproval = initial.approvals[0];
+  assert.ok(pendingApproval);
+  assert.equal(pendingApproval?.status, "requested");
+
+  const resumed = await orchestrator.resumeApproval({
+    approval_id: pendingApproval.id,
+    resolution: "approved",
+    task: initial.task,
+    plan: initial.plan,
+    workspaceRoot,
+  });
+
+  assert.equal(resumed.status, "resolved");
+  assert.equal(resumed.approval?.status, "approved");
+  assert.equal(resumed.stepResult?.execution.status, "succeeded");
+  assert.ok(resumed.events.some((event) => event.event_type === "step.approved"));
+  assert.ok(resumed.events.some((event) => event.event_type === "action.succeeded"));
+  assert.ok(gateway.getExecutions().includes("workspace.read_file:approved"));
+});
+
+test("resumeApproval denies a pending approval, emits step.denied, and does not execute the blocked tool", async (t) => {
+  const workspaceRoot = await createTempWorkspace();
+  t.after(async () => {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  });
+
+  const gateway = createApprovalAwareGateway();
+  const orchestrator = new PersonalAgentOrchestrator({
+    granted_capabilities: ["workspace.read", "workspace.write"],
+    gateway,
+  });
+
+  const initial = await orchestrator.run({
+    raw_request: "Inspect the workspace and read the README.",
+    created_by: "user_approval_deny",
+    workspaceRoot,
+  });
+
+  const pendingApproval = initial.approvals[0];
+  assert.ok(pendingApproval);
+
+  const executionsBeforeDeny = gateway.getExecutions().length;
+  const denied = await orchestrator.resumeApproval({
+    approval_id: pendingApproval!.id,
+    resolution: "denied",
+    task: initial.task,
+    plan: initial.plan,
+    workspaceRoot,
+  });
+
+  assert.equal(denied.status, "resolved");
+  assert.equal(denied.approval?.status, "denied");
+  assert.equal(denied.stepResult, undefined);
+  assert.ok(denied.events.some((event) => event.event_type === "step.denied"));
+  assert.equal(gateway.getExecutions().length, executionsBeforeDeny);
+});
+
+test("resumeApproval safely rejects unknown or already-terminal approvals without re-running any tool", async (t) => {
+  const workspaceRoot = await createTempWorkspace();
+  t.after(async () => {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  });
+
+  const gateway = createApprovalAwareGateway();
+  const orchestrator = new PersonalAgentOrchestrator({
+    granted_capabilities: ["workspace.read", "workspace.write"],
+    gateway,
+  });
+
+  const initial = await orchestrator.run({
+    raw_request: "Inspect the workspace and read the README.",
+    created_by: "user_approval_terminal",
+    workspaceRoot,
+  });
+
+  const pendingApproval = initial.approvals[0];
+  assert.ok(pendingApproval);
+
+  const missing = await orchestrator.resumeApproval({
+    approval_id: "approval_missing",
+    resolution: "approved",
+    task: initial.task,
+    plan: initial.plan,
+    workspaceRoot,
+  });
+  assert.equal(missing.status, "not_found");
+
+  const approved = await orchestrator.resumeApproval({
+    approval_id: pendingApproval!.id,
+    resolution: "approved",
+    task: initial.task,
+    plan: initial.plan,
+    workspaceRoot,
+  });
+  assert.equal(approved.status, "resolved");
+
+  const executionsAfterApprove = gateway.getExecutions().length;
+  const terminal = await orchestrator.resumeApproval({
+    approval_id: pendingApproval!.id,
+    resolution: "approved",
+    task: initial.task,
+    plan: initial.plan,
+    workspaceRoot,
+  });
+
+  assert.equal(terminal.status, "already_resolved");
+  assert.equal(terminal.approval?.status, "approved");
+  assert.equal(gateway.getExecutions().length, executionsAfterApprove);
 });

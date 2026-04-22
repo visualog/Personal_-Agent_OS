@@ -20,6 +20,8 @@ export interface ApprovalStore {
     resolvedAt?: string,
   ): Approval | null;
   get(id: string): Approval | null;
+  findPendingByStep(taskId: string, stepId: string): Approval | null;
+  listByTask(taskId: string): readonly Approval[];
   list(): readonly Approval[];
   listPending(): readonly Approval[];
   clear(): void;
@@ -79,6 +81,26 @@ export class InMemoryApprovalStore implements ApprovalStore {
   get(id: string): Approval | null {
     const approval = this.approvals.get(id);
     return approval ? cloneApproval(approval) : null;
+  }
+
+  findPendingByStep(taskId: string, stepId: string): Approval | null {
+    for (const approval of this.approvals.values()) {
+      if (
+        approval.task_id === taskId &&
+        approval.step_id === stepId &&
+        approval.status === "requested"
+      ) {
+        return cloneApproval(approval);
+      }
+    }
+
+    return null;
+  }
+
+  listByTask(taskId: string): readonly Approval[] {
+    return Array.from(this.approvals.values())
+      .filter((approval) => approval.task_id === taskId)
+      .map(cloneApproval);
   }
 
   list(): readonly Approval[] {

@@ -79,6 +79,22 @@ test("approval store cannot transition terminal states again", () => {
   assert.equal(store.get(approved.id)?.status, "approved");
 });
 
+test("approval store returns null for unknown approvals and keeps pending queue unchanged", () => {
+  const store = new InMemoryApprovalStore();
+
+  const approval = store.create({
+    task_id: "task_03",
+    step_id: "step_03",
+    summary: "Approve pending write",
+    risk_reasons: ["approval required"],
+  });
+
+  assert.equal(store.resolve("approval_missing", "approved"), null);
+  assert.equal(store.listPending().length, 1);
+  assert.equal(store.listPending()[0]?.id, approval.id);
+  assert.equal(store.get(approval.id)?.status, "requested");
+});
+
 function isApprovalRequestedEvent(event: Event): event is Extract<Event, { event_type: "step.approval_requested" }> {
   return event.event_type === "step.approval_requested";
 }
@@ -120,6 +136,9 @@ test("orchestrator with medium write tool and no approval produces requires_appr
   });
 
   assert.ok(result.steps.some((step) => step.execution.status === "requires_approval"));
+  assert.equal(result.approvals.length, 1);
+  assert.equal(result.approvals[0]?.status, "requested");
+  assert.ok(result.approvals[0]?.summary.includes("승인 필요"));
   assert.ok(
     result.events.some(
       (event) => isApprovalRequestedEvent(event) && Array.isArray(event.payload.risk_reasons),
