@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   fallbackCommandCenterState,
   fetchCommandCenterState,
+  resetCommandCenterState,
   resolveApprovalAction,
   type ApprovalQueueItem,
   type AuditRecordView,
@@ -322,6 +323,7 @@ export default function App() {
   });
   const [selectedTaskId, setSelectedTaskId] = useState(() => fallbackCommandCenterState.taskItems[0]?.id ?? '');
   const [busyApprovalId, setBusyApprovalId] = useState<string | null>(null);
+  const [isResetting, setIsResetting] = useState(false);
   const [runtimeMode, setRuntimeMode] = useState<'api' | 'snapshot'>('snapshot');
   const [bannerMessage, setBannerMessage] = useState('Live API not connected yet. Showing generated runtime snapshot.');
 
@@ -399,6 +401,32 @@ export default function App() {
     }
   };
 
+  const handleResetDemo = async () => {
+    setIsResetting(true);
+
+    try {
+      const nextState = await resetCommandCenterState();
+      setCommandCenterState({
+        taskItems: sortTaskItems(nextState.taskItems),
+        approvalQueue: nextState.approvalQueue,
+        taskDetails: nextState.taskDetails,
+      });
+      setSelectedTaskId(nextState.taskItems[0]?.id ?? '');
+      setRuntimeMode('api');
+      setBannerMessage(
+        'Live dev runtime reset. You can now test approve, deny, request changes, and cancel from a clean state.',
+      );
+    } catch (error) {
+      setBannerMessage(
+        error instanceof Error
+          ? `Demo reset failed: ${error.message}`
+          : 'Demo reset failed.',
+      );
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
   if (!selectedDetail) {
     return (
       <div className="app-shell">
@@ -424,9 +452,20 @@ export default function App() {
               <p className="eyebrow">Runtime</p>
               <h2>{runtimeMode === 'api' ? 'Live Dev Runtime' : 'Generated Snapshot'}</h2>
             </div>
-            <span className={`summary-chip ${runtimeMode === 'api' ? '' : 'attention'}`}>
-              {runtimeMode === 'api' ? 'Connected' : 'Fallback'}
-            </span>
+            <div className="runtime-actions">
+              <span className={`summary-chip ${runtimeMode === 'api' ? '' : 'attention'}`}>
+                {runtimeMode === 'api' ? 'Connected' : 'Fallback'}
+              </span>
+              <button
+                type="button"
+                className="iconless-button"
+                onClick={handleResetDemo}
+                disabled={runtimeMode !== 'api' || isResetting}
+                data-testid="reset-demo-button"
+              >
+                {isResetting ? 'Resetting...' : 'Reset Demo'}
+              </button>
+            </div>
           </div>
           <div className="section-body">
             <p className="overview-copy" data-testid="runtime-banner-message">{bannerMessage}</p>

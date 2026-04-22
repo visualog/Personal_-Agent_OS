@@ -142,6 +142,13 @@ select {
   font-size: 20px;
 }
 
+.runtime-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .summary-chip,
 .meta-chip,
 .action-tag,
@@ -288,6 +295,27 @@ select {
 .action-button:hover {
   border-color: rgba(40, 116, 240, 0.35);
   background: #eef5ff;
+}
+
+.iconless-button {
+  min-height: 32px;
+  padding: 0 14px;
+  border: 1px solid rgba(18, 24, 38, 0.12);
+  border-radius: 8px;
+  background: #ffffff;
+  color: #24344a;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.iconless-button:hover:not(:disabled) {
+  border-color: rgba(40, 116, 240, 0.35);
+  background: #eef5ff;
+}
+
+.iconless-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
 }
 
 .action-approve {

@@ -114,6 +114,7 @@ task detail은 아래를 한 번에 연결해서 보여줘야 한다.
 - `cancel_task`는 pending approval을 `expired`로 닫고 task/plan을 `canceled`로 전환한다.
 - `tests/ui/command-center-ui.test.ts`는 위 4개 action의 브라우저 회귀 경로를 검증한다.
 - UI 회귀 테스트는 dev preview를 새로 띄우지 않고, 실행 중인 preview에 `reset` API를 호출해 상태를 초기화한다.
+- 웹 UI는 `Reset Demo` 버튼으로 같은 reset 경로를 직접 호출할 수 있다.
 
 ## 6. 수용 기준
 

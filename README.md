@@ -37,6 +37,8 @@ And a browser-level regression command for the Command Center preview:
 
 - `npm run test:ui` (with `dev:web` running)
 
+The live preview also includes a `Reset Demo` control so the local runtime can be returned to a clean approval state between manual test passes.
+
 ## Repository Layout
 
 - `apps/`: runnable applications

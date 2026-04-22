@@ -98,6 +98,17 @@ export async function fetchCommandCenterState(): Promise<CommandCenterState> {
   return response.json() as Promise<CommandCenterState>;
 }
 
+export async function resetCommandCenterState(): Promise<CommandCenterState> {
+  const response = await fetch('/api/command-center/reset', {
+    method: 'POST',
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to reset command center state: ${response.status}`);
+  }
+
+  return response.json() as Promise<CommandCenterState>;
+}
+
 export async function resolveApprovalAction(
   approvalId: string,
   action: RuntimeApprovalAction,
