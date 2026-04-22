@@ -9,6 +9,7 @@
 - [Glossary](architecture/glossary.md): 구현과 이슈 작성에 쓰는 공통 용어
 - [Events](architecture/events.md): 내부 이벤트 계약과 payload 기준
 - [Policy and Permissions](security/policy-and-permissions.md): 위험도, capability, 승인 정책
+- [Policy Engine Runtime](security/policy-engine-runtime.md): `evaluatePolicy` 입력과 판정 규칙
 - [Memory Privacy](security/memory-privacy.md): 메모리 분류와 민감정보 처리
 - [MVP Backlog](issues/mvp-backlog.md): GitHub Issue로 옮길 작업 목록
 - [Issue Template](issues/issue-template.md): 이슈 작성 템플릿
