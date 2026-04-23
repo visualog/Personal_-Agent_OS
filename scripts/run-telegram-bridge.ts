@@ -4,6 +4,36 @@ import {
 } from "../packages/core/src/index.js";
 import { getCommandCenterDemoRuntime } from "./command-center-demo-runtime.js";
 
+function createDaemonBackedService(daemonUrl: string) {
+  return {
+    async submitCommand(input: {
+      text: string;
+      actor_id: string;
+      channel: "telegram";
+    }) {
+      const response = await fetch(`${daemonUrl}/api/remote/commands`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(input),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Agent daemon submit failed: ${response.status}`);
+      }
+
+      return await response.json() as {
+        readonly status: "accepted" | "rejected";
+        readonly reasons: readonly string[];
+        readonly summary: string;
+        readonly task_id?: string;
+        readonly approval_id?: string;
+      };
+    },
+  };
+}
+
 function readRequiredEnv(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) {
@@ -25,13 +55,25 @@ async function main(): Promise<void> {
   const token = readRequiredEnv("TELEGRAM_BOT_TOKEN");
   const allowedUserIds = readAllowedUserIds();
   const pollIntervalMs = Number(process.env.PAOS_BRIDGE_POLL_INTERVAL_MS ?? "3000");
+  const daemonUrl = process.env.PAOS_AGENT_DAEMON_URL?.trim();
 
   const client = createTelegramBotClient({ token });
-  const runtime = await getCommandCenterDemoRuntime();
+  const runtime = daemonUrl ? null : await getCommandCenterDemoRuntime();
+  const service = daemonUrl
+    ? createDaemonBackedService(daemonUrl)
+    : {
+        submitCommand: async (input: { text: string; actor_id: string; channel: "telegram" }) =>
+          runtime!.submitRemoteCommand(input),
+      };
   let offset = 0;
 
   console.log("[telegram-bridge] started");
   console.log(`[telegram-bridge] allowed users: ${allowedUserIds.join(", ")}`);
+  if (daemonUrl) {
+    console.log(`[telegram-bridge] daemon target: ${daemonUrl}`);
+  } else {
+    console.log("[telegram-bridge] using embedded demo runtime");
+  }
 
   while (true) {
     try {
@@ -47,9 +89,7 @@ async function main(): Promise<void> {
             allowed_user_ids: allowedUserIds,
             bot_name: "Personal Agent OS",
           },
-          service: {
-            submitCommand: async (input) => runtime.submitRemoteCommand(input),
-          },
+          service,
           client,
         });
 

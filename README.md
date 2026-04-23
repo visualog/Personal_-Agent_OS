@@ -46,6 +46,13 @@ The repo now also includes a first Telegram bridge MVP that can long-poll Telegr
 - requires `TELEGRAM_ALLOWED_USER_IDS`
 - enforces allowlisted Telegram users before forwarding commands
 
+The local agent can also run as a standalone daemon instead of depending on the Vite preview server:
+
+- `npm run start:agent-daemon`
+- default health endpoint: `GET /health`
+- default remote command endpoint: `POST /api/remote/commands`
+- Telegram bridge can target it with `PAOS_AGENT_DAEMON_URL=http://127.0.0.1:4180`
+
 ## Repository Layout
 
 - `apps/`: runnable applications
