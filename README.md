@@ -39,6 +39,13 @@ And a browser-level regression command for the Command Center preview:
 
 The live preview also includes a `Reset Demo` control so the local runtime can be returned to a clean approval state between manual test passes.
 
+The repo now also includes a first Telegram bridge MVP that can long-poll Telegram updates and route them into the same remote command contract used by the web demo:
+
+- `npm run start:telegram-bridge`
+- requires `TELEGRAM_BOT_TOKEN`
+- requires `TELEGRAM_ALLOWED_USER_IDS`
+- enforces allowlisted Telegram users before forwarding commands
+
 ## Repository Layout
 
 - `apps/`: runnable applications

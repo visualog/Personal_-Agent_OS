@@ -15,6 +15,7 @@
 - [Runtime Read Model](architecture/read-model.md): task 기준 상태/승인/위험/이벤트 조회 계약
 - [Command Center Model](architecture/command-center.md): task list/detail, approval queue, audit detail 정보 구조
 - [Remote Command Channel](architecture/remote-command-channel.md): 원격 명령 계약과 로컬 agent 채널 초안
+- [Telegram Bridge](architecture/telegram-bridge.md): Telegram long polling 기반 로컬 원격 제어 브리지
 - `apps/web`: 첫 번째 Command Center 웹 프로토타입
 - [Policy and Permissions](security/policy-and-permissions.md): 위험도, capability, 승인 정책
 - [Policy Engine Runtime](security/policy-engine-runtime.md): `evaluatePolicy` 입력과 판정 규칙

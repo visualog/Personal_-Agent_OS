@@ -19,3 +19,4 @@ export * from "./memory-api.js";
 export * from "./runtime-control.js";
 export * from "./command-center.js";
 export * from "./remote-control.js";
+export * from "./telegram-bridge.js";
