@@ -15,7 +15,7 @@ test("agent daemon exposes health and remote command endpoints", async () => {
     method: "POST",
     pathname: "/api/remote/commands",
     body: {
-      text: "/task 이 저장소에서 로그인 오류를 수정해줘",
+      text: "/task README.md 파일에서 로그인 오류 수정 방향을 정리해줘",
       actor_id: "daemon_test_user",
       channel: "cli",
     },

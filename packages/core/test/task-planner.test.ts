@@ -79,3 +79,39 @@ test("createPlan fallback still creates at least one ready step", () => {
   assert.ok(result.plan.steps.length >= 1);
   assert.equal(result.plan.steps[0].status, "ready");
 });
+
+test("createPlan for coding request without explicit target path creates proposal-only flow", () => {
+  const result = createPlan({
+    task: {
+      id: "task_04",
+      raw_request: "로그인 오류를 수정해줘",
+    } as Task,
+  });
+
+  assert.deepEqual(
+    result.plan.steps.map((step) => step.tool_name),
+    ["workspace.list_files", "workspace.read_file", "workspace.write_draft"],
+  );
+  assert.equal(result.event.payload.requires_approval, false);
+});
+
+test("createPlan for coding request with explicit file path adds approval-gated apply step", () => {
+  const result = createPlan({
+    task: {
+      id: "task_05",
+      raw_request: "packages/core/src/orchestrator.ts 파일의 로그인 오류를 수정해줘",
+    } as Task,
+  });
+
+  assert.deepEqual(
+    result.plan.steps.map((step) => step.tool_name),
+    [
+      "workspace.list_files",
+      "workspace.read_file",
+      "workspace.write_draft",
+      "workspace.apply_file_edit",
+    ],
+  );
+  assert.equal(result.event.payload.requires_approval, true);
+  assert.deepEqual(result.plan.steps[3]?.depends_on, [result.plan.steps[2]!.id]);
+});

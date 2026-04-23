@@ -121,6 +121,27 @@ function createActionId(): string {
   return `action_${randomUUID()}`;
 }
 
+const CODE_FILE_EXTENSIONS = [
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".py",
+  ".rb",
+  ".go",
+  ".rs",
+  ".java",
+  ".swift",
+  ".kt",
+  ".json",
+  ".md",
+  ".txt",
+];
+
+const PATH_HINT_PATTERN = /[`"'(]?([A-Za-z0-9_./-]+\.[A-Za-z0-9]+|[A-Za-z0-9_./-]+\/[A-Za-z0-9_./-]+)[`"')?,]?/g;
+
 function summarizeEvent(event: Event): string {
   switch (event.event_type) {
     case "task.created":
@@ -943,25 +964,32 @@ export class PersonalAgentOrchestrator {
     listFilesOutput: unknown,
     workspaceRoot: string,
   ): unknown {
+    const entries = this.extractListFilesEntries(listFilesOutput);
+
     if (step.tool_name === "workspace.list_files") {
       return { root: workspaceRoot };
     }
 
     if (step.tool_name === "workspace.read_file") {
-      const entries = this.extractListFilesEntries(listFilesOutput);
-      const firstFilePath = entries.find((entry) => entry.type === "file")?.path;
+      const explicitTargetPath = this.findRequestedWorkspacePath(task.raw_request, entries);
+      const firstFilePath = explicitTargetPath
+        ?? entries.find((entry) => entry.type === "file")?.path;
       return {
         root: workspaceRoot,
         path: firstFilePath ?? "README.md",
       };
     }
 
-    if (step.tool_name === "workspace.write_file") {
-      const entries = this.extractListFilesEntries(listFilesOutput)
-        .filter((entry) => entry.type === "file")
+    if (step.tool_name === "workspace.write_draft") {
+      const candidateFiles = this.selectCandidateFiles(entries);
+      const explicitTargetPath = this.findRequestedWorkspacePath(task.raw_request, entries);
+      const candidateList = candidateFiles
         .slice(0, 5)
         .map((entry) => `- ${entry.path}`)
         .join("\n");
+      const applyInstruction = explicitTargetPath
+        ? `- 승인 후 ${explicitTargetPath}에 제한된 append 수정이 적용됩니다.`
+        : "- 실제 파일 수정을 원하면 다음 요청에 대상 파일 경로를 포함해 주세요. 예: packages/core/src/orchestrator.ts";
 
       return {
         root: workspaceRoot,
@@ -972,11 +1000,44 @@ export class PersonalAgentOrchestrator {
           `Task ID: ${task.id}`,
           `Request: ${task.raw_request}`,
           "",
+          "Explicit target:",
+          explicitTargetPath ?? "명시되지 않음",
+          "",
           "Candidate files:",
-          entries || "- README.md",
+          candidateList || "- README.md",
+          "",
+          "Planned change:",
+          explicitTargetPath
+            ? `- ${explicitTargetPath}에 승인 기반 수정 메모를 append`
+            : "- 우선 제안 초안만 생성",
           "",
           "Next step:",
-          "- Review this draft and approve a concrete file-level implementation request.",
+          applyInstruction,
+        ].join("\n"),
+      };
+    }
+
+    if (step.tool_name === "workspace.apply_file_edit") {
+      const explicitTargetPath = this.findRequestedWorkspacePath(task.raw_request, entries);
+      const targetPath = explicitTargetPath ?? "README.md";
+
+      return {
+        root: workspaceRoot,
+        path: targetPath,
+        mode: "append",
+        content: this.buildApprovedChangeBlock(task, targetPath),
+      };
+    }
+
+    if (step.tool_name === "workspace.write_file") {
+      return {
+        root: workspaceRoot,
+        path: `docs/agent-drafts/${task.id}.md`,
+        content: [
+          "# Agent Draft",
+          "",
+          `Task ID: ${task.id}`,
+          `Request: ${task.raw_request}`,
         ].join("\n"),
       };
     }
@@ -1007,5 +1068,76 @@ export class PersonalAgentOrchestrator {
         path: entry.path,
         type: typeof entry.type === "string" ? entry.type : undefined,
       }));
+  }
+
+  private findRequestedWorkspacePath(
+    rawRequest: string,
+    entries: Array<{ path: string; type?: string }>,
+  ): string | null {
+    const fileEntries = entries.filter((entry) => entry.type === "file");
+    const matches = [...rawRequest.matchAll(PATH_HINT_PATTERN)];
+
+    for (const match of matches) {
+      const token = match[1]?.replace(/^[./]+/, (value) => (value === "./" ? "" : value)) ?? "";
+      if (!token) {
+        continue;
+      }
+
+      const exactMatch = fileEntries.find((entry) => entry.path === token);
+      if (exactMatch) {
+        return exactMatch.path;
+      }
+
+      const baseNameMatches = fileEntries.filter((entry) => entry.path.endsWith(`/${token}`) || entry.path === token);
+      if (baseNameMatches.length === 1) {
+        return baseNameMatches[0]?.path ?? null;
+      }
+    }
+
+    return null;
+  }
+
+  private selectCandidateFiles(
+    entries: Array<{ path: string; type?: string }>,
+  ): Array<{ path: string; type?: string }> {
+    const fileEntries = entries.filter((entry) => entry.type === "file");
+    const preferred = fileEntries.filter((entry) =>
+      CODE_FILE_EXTENSIONS.some((extension) => entry.path.endsWith(extension)),
+    );
+
+    return preferred.length > 0 ? preferred : fileEntries;
+  }
+
+  private buildApprovedChangeBlock(task: Task, targetPath: string): string {
+    const extension = targetPath.includes(".")
+      ? targetPath.slice(targetPath.lastIndexOf("."))
+      : "";
+
+    if ([".py", ".rb", ".sh", ".yaml", ".yml"].includes(extension)) {
+      return [
+        "",
+        `# PAOS approved change note (${task.id})`,
+        `# Request: ${task.raw_request}`,
+        "# Follow-up: replace this note with a concrete implementation patch.",
+      ].join("\n");
+    }
+
+    if (extension === ".md" || extension === ".txt") {
+      return [
+        "",
+        "## PAOS Approved Change Note",
+        "",
+        `- task_id: ${task.id}`,
+        `- request: ${task.raw_request}`,
+        "- follow_up: replace this note with a concrete implementation patch.",
+      ].join("\n");
+    }
+
+    return [
+      "",
+      `// PAOS approved change note (${task.id})`,
+      `// Request: ${task.raw_request}`,
+      "// Follow-up: replace this note with a concrete implementation patch.",
+    ].join("\n");
   }
 }

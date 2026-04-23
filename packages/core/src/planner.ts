@@ -40,6 +40,8 @@ const CODE_KEYWORDS = [
   "code",
 ];
 
+const PATH_HINT_PATTERN = /[`"'(]?([A-Za-z0-9_./-]+\.[A-Za-z0-9]+|[A-Za-z0-9_./-]+\/[A-Za-z0-9_./-]+)[`"')?,]?/g;
+
 function hasWorkspaceReadIntent(rawRequest: string): boolean {
   const normalized = rawRequest.toLowerCase();
   return STATUS_KEYWORDS.some((keyword) =>
@@ -52,6 +54,24 @@ function hasCodeIntent(rawRequest: string): boolean {
   return CODE_KEYWORDS.some((keyword) =>
     normalized.includes(keyword.toLowerCase()),
   );
+}
+
+function extractRequestedPath(rawRequest: string): string | null {
+  const matches = [...rawRequest.matchAll(PATH_HINT_PATTERN)];
+  for (const match of matches) {
+    const candidate = match[1]?.trim();
+    if (!candidate) {
+      continue;
+    }
+
+    if (candidate.startsWith("./")) {
+      return candidate.slice(2);
+    }
+
+    return candidate;
+  }
+
+  return null;
 }
 
 function buildStep(
@@ -80,6 +100,7 @@ export function createPlan(input: CreatePlanInput): PlannerResult {
   const planId = `plan_${randomUUID()}`;
   const requiresWorkspaceRead = hasWorkspaceReadIntent(input.task.raw_request);
   const requiresCodeWrite = hasCodeIntent(input.task.raw_request);
+  const requestedPath = extractRequestedPath(input.task.raw_request);
 
   const steps = requiresCodeWrite
     ? [
@@ -99,11 +120,22 @@ export function createPlan(input: CreatePlanInput): PlannerResult {
         ),
         buildStep(
           planId,
-          "작업공간 코드 수정",
-          "workspace.write_file",
+          "수정 제안 초안 작성",
+          "workspace.write_draft",
           ["workspace.write"],
-          "high",
+          "low",
         ),
+        ...(requestedPath
+          ? [
+              buildStep(
+                planId,
+                "승인 후 파일 수정 적용",
+                "workspace.apply_file_edit",
+                ["workspace.write"],
+                "high",
+              ),
+            ]
+          : []),
       ]
     : requiresWorkspaceRead
     ? [
@@ -146,11 +178,20 @@ export function createPlan(input: CreatePlanInput): PlannerResult {
     };
   }
 
+  if (steps.length > 3) {
+    steps[3] = {
+      ...steps[3],
+      depends_on: [steps[2].id],
+    };
+  }
+
   const plan: Plan = {
     id: planId,
     task_id: input.task.id,
     summary: requiresCodeWrite
-      ? "작업공간 상태를 확인한 뒤 코드를 수정하는 초안입니다."
+      ? requestedPath
+        ? "작업공간 상태를 확인하고 수정 제안을 만든 뒤 승인 시 파일에 적용하는 초안입니다."
+        : "작업공간 상태를 확인하고 수정 제안 초안을 생성하는 계획입니다."
       : requiresWorkspaceRead
       ? "작업공간 상태를 확인한 뒤 파일을 읽는 초안입니다."
       : "작업공간 파일 목록을 확인하는 초안입니다.",
@@ -171,7 +212,7 @@ export function createPlan(input: CreatePlanInput): PlannerResult {
     payload: {
       plan_id: planId,
       step_count: steps.length,
-      requires_approval: requiresCodeWrite,
+      requires_approval: Boolean(requestedPath && requiresCodeWrite),
       risk_summary: {
         low: steps.filter((step) => step.risk_level === "low").length,
         medium: steps.filter((step) => step.risk_level === "medium").length,

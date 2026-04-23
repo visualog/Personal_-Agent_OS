@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -65,6 +66,66 @@ test("run creates task and plan and executes workspace list/read successfully", 
   assert.ok(result.steps.some((step) => step.step.tool_name === "workspace.read_file"));
   assert.ok(result.steps.every((step) => step.execution.status === "succeeded"));
   assert.ok(result.steps.every((step) => step.step.status === "completed"));
+});
+
+test("coding task without explicit target path writes a proposal draft and completes without source edit approval", async (t) => {
+  const workspaceRoot = await createTempWorkspace();
+  t.after(async () => {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  });
+
+  const orchestrator = new PersonalAgentOrchestrator({
+    granted_capabilities: ["workspace.read", "workspace.write"],
+  });
+
+  const result = await orchestrator.run({
+    raw_request: "이 저장소에서 로그인 오류를 수정해줘",
+    created_by: "user_code_01",
+    workspaceRoot,
+  });
+
+  assert.equal(result.task.status, "completed");
+  assert.equal(result.approvals.length, 0);
+  assert.ok(result.steps.some((step) => step.step.tool_name === "workspace.write_draft"));
+  assert.ok(!result.steps.some((step) => step.step.tool_name === "workspace.apply_file_edit"));
+});
+
+test("coding task with explicit target path requests approval for apply step and appends approved note after resume", async (t) => {
+  const workspaceRoot = await createTempWorkspace();
+  t.after(async () => {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  });
+
+  const orchestrator = new PersonalAgentOrchestrator({
+    granted_capabilities: ["workspace.read", "workspace.write"],
+  });
+
+  const result = await orchestrator.run({
+    raw_request: "README.md 파일에서 로그인 오류 수정 방향을 정리해줘",
+    created_by: "user_code_02",
+    workspaceRoot,
+  });
+
+  const approval = result.approvals[0];
+  assert.ok(approval);
+  assert.equal(result.task.status, "waiting_approval");
+  assert.ok(result.steps.some((step) => step.step.tool_name === "workspace.write_draft"));
+  assert.ok(result.steps.some((step) => step.step.tool_name === "workspace.apply_file_edit"));
+
+  const resume = await orchestrator.resumeApproval({
+    approval_id: approval.id,
+    resolution: "approved",
+    task: result.task,
+    plan: result.plan,
+    workspaceRoot,
+  });
+
+  assert.equal(resume.status, "resolved");
+  assert.equal(resume.task?.status, "completed");
+
+  const readme = await readFile(path.join(workspaceRoot, "README.md"), "utf8");
+  assert.match(readme, /PAOS Approved Change Note/);
+  assert.match(readme, /README\.md 파일에서 로그인 오류 수정 방향을 정리해줘/);
 });
 
 test("event stream includes task.created, plan.drafted, action.started, action.succeeded", async (t) => {

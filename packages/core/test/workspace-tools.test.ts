@@ -10,6 +10,7 @@ import {
   listWorkspaceFiles,
   readWorkspaceFile,
   resolveWorkspacePath,
+  writeWorkspaceFile,
 } from "../src/index.js";
 
 async function createTempWorkspace(): Promise<string> {
@@ -58,6 +59,24 @@ test("readWorkspaceFile reads utf8 content and truncates when maxBytes is small"
 
   assert.equal(full, "child file");
   assert.equal(truncated, "chil");
+});
+
+test("writeWorkspaceFile supports append mode for approved edits", async (t) => {
+  const root = await createTempWorkspace();
+  t.after(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  await writeWorkspaceFile({
+    root,
+    path: "root.txt",
+    content: "second line",
+    mode: "append",
+  });
+
+  const updated = await readWorkspaceFile({ root }, "root.txt");
+  assert.match(updated, /root file/);
+  assert.match(updated, /second line/);
 });
 
 test("createWorkspaceToolGatewayTools registers with InMemoryToolGateway and succeeds for workspace.read capability", async (t) => {
@@ -116,4 +135,52 @@ test("gateway denies read tool if workspace.read capability missing", async (t) 
   });
 
   assert.equal(result.status, "denied");
+});
+
+test("draft and apply edit tools register and enforce their input constraints", async (t) => {
+  const root = await createTempWorkspace();
+  t.after(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const gateway = new InMemoryToolGateway();
+  const tools = createWorkspaceToolGatewayTools({ root });
+
+  for (const tool of tools) {
+    gateway.registerTool(tool);
+  }
+
+  const draftResult = await gateway.execute({
+    action_id: "action_03",
+    step_id: "step_03",
+    tool_name: "workspace.write_draft",
+    input: {
+      path: "docs/agent-drafts/proposal.md",
+      content: "# Draft",
+    },
+    granted_capabilities: ["workspace.write"],
+    scope_allowed: true,
+    sandbox_matched: true,
+  });
+
+  assert.equal(draftResult.status, "succeeded");
+
+  const applyResult = await gateway.execute({
+    action_id: "action_04",
+    step_id: "step_04",
+    tool_name: "workspace.apply_file_edit",
+    input: {
+      path: "root.txt",
+      content: "approved line",
+      mode: "append",
+    },
+    granted_capabilities: ["workspace.write"],
+    scope_allowed: true,
+    sandbox_matched: true,
+    approval_granted: true,
+  });
+
+  assert.equal(applyResult.status, "succeeded");
+  const updated = await readWorkspaceFile({ root }, "root.txt");
+  assert.match(updated, /approved line/);
 });

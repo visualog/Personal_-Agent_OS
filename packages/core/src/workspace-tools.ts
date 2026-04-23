@@ -41,11 +41,13 @@ export interface WriteWorkspaceFileInput {
   root: string;
   path: string;
   content: string;
+  mode?: "replace" | "append";
 }
 
 export interface WriteWorkspaceFileOutput {
   path: string;
   bytes: number;
+  mode: "replace" | "append";
 }
 
 function toPosixPath(value: string): string {
@@ -188,17 +190,33 @@ export async function writeWorkspaceFile(
   const root = path.resolve(input.root);
   const scope: WorkspaceScope = { root };
   const absolutePath = resolveWorkspacePath(scope, input.path);
+  const mode = input.mode ?? "replace";
 
   if (isIgnoredPath(scope, absolutePath)) {
     throw new Error(`Workspace path is ignored: ${input.path}`);
   }
 
   await mkdir(path.dirname(absolutePath), { recursive: true });
-  await writeFile(absolutePath, input.content, "utf8");
+  if (mode === "append") {
+    let existing = "";
+    try {
+      existing = await readFile(absolutePath, "utf8");
+    } catch {
+      existing = "";
+    }
+
+    const next = existing
+      ? `${existing}${existing.endsWith("\n") ? "" : "\n"}${input.content}`
+      : input.content;
+    await writeFile(absolutePath, next, "utf8");
+  } else {
+    await writeFile(absolutePath, input.content, "utf8");
+  }
 
   return {
     path: toPosixPath(input.path),
     bytes: Buffer.byteLength(input.content, "utf8"),
+    mode,
   };
 }
 
@@ -238,12 +256,40 @@ export const workspaceWriteFileToolDefinition: ToolDefinition = {
   status: "enabled",
 };
 
+export const workspaceWriteDraftToolDefinition: ToolDefinition = {
+  name: "workspace.write_draft",
+  description: "Write a low-risk proposal draft inside docs/agent-drafts.",
+  input_schema: { type: "object" },
+  output_schema: { type: "object" },
+  capabilities: ["workspace.write"],
+  default_risk: "low",
+  requires_approval: false,
+  sandbox: "workspace",
+  status: "enabled",
+};
+
+export const workspaceApplyFileEditToolDefinition: ToolDefinition = {
+  name: "workspace.apply_file_edit",
+  description: "Apply an approved append-only edit to a workspace file.",
+  input_schema: { type: "object" },
+  output_schema: { type: "object" },
+  capabilities: ["workspace.write"],
+  default_risk: "high",
+  requires_approval: true,
+  sandbox: "workspace",
+  status: "enabled",
+};
+
 function assertObjectInput(input: unknown): Record<string, unknown> {
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
     throw new Error("Workspace tool input must be an object.");
   }
 
   return input as Record<string, unknown>;
+}
+
+function readWriteMode(input: Record<string, unknown>): "replace" | "append" {
+  return input.mode === "append" ? "append" : "replace";
 }
 
 export function createWorkspaceToolGatewayTools(
@@ -297,6 +343,48 @@ export function createWorkspaceToolGatewayTools(
           root: scope.root,
           path: objectInput.path,
           content: objectInput.content,
+          mode: readWriteMode(objectInput),
+        });
+      },
+    },
+    {
+      definition: workspaceWriteDraftToolDefinition,
+      handler: async (input) => {
+        const objectInput = assertObjectInput(input);
+        if (typeof objectInput.path !== "string") {
+          throw new Error("workspace.write_draft requires a string path.");
+        }
+        if (!objectInput.path.startsWith("docs/agent-drafts/")) {
+          throw new Error("workspace.write_draft must write inside docs/agent-drafts/.");
+        }
+        if (typeof objectInput.content !== "string") {
+          throw new Error("workspace.write_draft requires a string content.");
+        }
+
+        return writeWorkspaceFile({
+          root: scope.root,
+          path: objectInput.path,
+          content: objectInput.content,
+          mode: "replace",
+        });
+      },
+    },
+    {
+      definition: workspaceApplyFileEditToolDefinition,
+      handler: async (input) => {
+        const objectInput = assertObjectInput(input);
+        if (typeof objectInput.path !== "string") {
+          throw new Error("workspace.apply_file_edit requires a string path.");
+        }
+        if (typeof objectInput.content !== "string") {
+          throw new Error("workspace.apply_file_edit requires a string content.");
+        }
+
+        return writeWorkspaceFile({
+          root: scope.root,
+          path: objectInput.path,
+          content: objectInput.content,
+          mode: readWriteMode(objectInput),
         });
       },
     },
