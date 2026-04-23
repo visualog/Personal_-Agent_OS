@@ -128,6 +128,49 @@ select {
   margin-bottom: 20px;
 }
 
+.remote-command-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.remote-command-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: #445066;
+}
+
+.remote-command-field textarea {
+  width: 100%;
+  min-height: 92px;
+  padding: 12px 14px;
+  border: 1px solid rgba(18, 24, 38, 0.12);
+  border-radius: 8px;
+  background: #ffffff;
+  color: #121826;
+  resize: vertical;
+}
+
+.remote-command-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.remote-command-receipt {
+  padding: 14px 16px;
+  border: 1px solid rgba(40, 116, 240, 0.18);
+  border-radius: 8px;
+  background: #eef5ff;
+}
+
+.remote-command-receipt p {
+  margin: 8px 0 0;
+  color: #445066;
+}
+
 .panel-heading,
 .section-heading {
   display: flex;

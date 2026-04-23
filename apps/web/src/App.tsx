@@ -4,9 +4,11 @@ import {
   fetchCommandCenterState,
   resetCommandCenterState,
   resolveApprovalAction,
+  submitRemoteCommand,
   type ApprovalQueueItem,
   type AuditRecordView,
   type CommandCenterState,
+  type RemoteCommandReceipt,
   type RiskFlagView,
   type RuntimeApprovalAction,
   type StepView,
@@ -22,20 +24,64 @@ type DetailSectionProps = {
 };
 
 const statusLabels: Record<string, string> = {
-  completed: 'Completed',
-  waiting_approval: 'Waiting Approval',
-  failed: 'Failed',
-  blocked: 'Blocked',
-  running: 'Running',
-  partially_approved: 'Partially Approved',
-  canceled: 'Canceled',
-  approved: 'Approved',
-  denied: 'Denied',
-  requested: 'Requested',
+  completed: '완료',
+  waiting_approval: '승인 대기',
+  failed: '실패',
+  blocked: '차단됨',
+  running: '실행 중',
+  partially_approved: '부분 승인',
+  canceled: '취소됨',
+  skipped: '건너뜀',
+  approved: '승인됨',
+  denied: '거부됨',
+  requested: '요청됨',
+};
+
+const riskLevelLabels: Record<string, string> = {
+  low: '낮음',
+  medium: '보통',
+  high: '높음',
+  critical: '치명적',
+};
+
+const eventLabels: Record<string, string> = {
+  'task.created': '작업 생성',
+  'task.updated': '작업 상태 변경',
+  'plan.drafted': '계획 초안 생성',
+  'plan.updated': '계획 상태 변경',
+  'step.ready': '단계 준비 완료',
+  'step.approval_requested': '승인 요청',
+  'step.approved': '승인 완료',
+  'step.denied': '승인 거부',
+  'step.changes_requested': '수정 요청',
+  'policy.evaluated': '정책 평가',
+  'risk.flagged': '위험 신호',
+  'action.started': '작업 실행 시작',
+  'action.succeeded': '작업 실행 성공',
+  'action.failed': '작업 실행 실패',
+};
+
+const priorityLabels: Record<string, string> = {
+  low: '낮음',
+  normal: '보통',
+  high: '높음',
+  urgent: '긴급',
+};
+
+const channelLabels: Record<string, string> = {
+  audit: '감사',
+  'command-center': '명령 센터',
 };
 
 function formatActionLabel(action: string): string {
-  return action.replace('_', ' ');
+  const labels: Record<string, string> = {
+    approve: '승인',
+    deny: '거부',
+    request_changes: '수정 요청',
+    cancel_task: '작업 취소',
+  };
+
+  return labels[action] ?? action.replace('_', ' ');
 }
 
 function sortTaskItems(items: TaskItem[]): TaskItem[] {
@@ -63,13 +109,13 @@ function TaskList({
   onSelect: (taskId: string) => void;
 }) {
   return (
-    <section className="panel task-list-panel" aria-label="Tasks">
+    <section className="panel task-list-panel" aria-label="작업 목록">
       <div className="panel-heading">
         <div>
-          <p className="eyebrow">Tasks</p>
-          <h2>Command Center</h2>
+          <p className="eyebrow">작업</p>
+          <h2>명령 센터</h2>
         </div>
-        <span className="summary-chip">{items.length} active views</span>
+        <span className="summary-chip">{items.length}개 작업 보기</span>
       </div>
       <div className="task-list" role="list">
         {items.map((item) => {
@@ -90,9 +136,9 @@ function TaskList({
               </div>
               <p>{item.summary}</p>
               <div className="task-row-meta">
-                <span>{item.priority.toUpperCase()}</span>
-                <span>{item.pending_approval_count} pending approvals</span>
-                <span>{item.risk_flag_count} risk flags</span>
+                <span>{priorityLabels[item.priority] ?? item.priority}</span>
+                <span>승인 대기 {item.pending_approval_count}건</span>
+                <span>위험 신호 {item.risk_flag_count}건</span>
               </div>
             </button>
           );
@@ -116,17 +162,17 @@ function ApprovalQueueList({
   busyApprovalId: string | null;
 }) {
   return (
-    <section className="panel approval-panel" aria-label="Approval Queue">
+    <section className="panel approval-panel" aria-label="승인 대기열">
       <div className="panel-heading">
         <div>
-          <p className="eyebrow">Approvals</p>
-          <h2>Approval Queue</h2>
+          <p className="eyebrow">승인</p>
+          <h2>승인 대기열</h2>
         </div>
-        <span className="summary-chip attention">{items.length} waiting</span>
+        <span className="summary-chip attention">{items.length}건 대기 중</span>
       </div>
       <div className="approval-list" role="list">
         {items.length === 0 ? (
-          <p className="empty-state">No pending approvals in the current runtime snapshot.</p>
+          <p className="empty-state">현재 런타임 스냅샷에는 승인 대기 항목이 없습니다.</p>
         ) : (
           items.map((item) => (
             <article
@@ -142,12 +188,12 @@ function ApprovalQueueList({
                 <div className="approval-header">
                   <strong>{item.title}</strong>
                   <span className={`risk-pill risk-${item.risk_level}`}>
-                    {item.risk_level.toUpperCase()}
+                    {riskLevelLabels[item.risk_level] ?? item.risk_level}
                   </span>
                 </div>
                 <p>{item.summary}</p>
               </button>
-              <div className="approval-actions" aria-label="Approval actions">
+              <div className="approval-actions" aria-label="승인 작업">
                 {item.actions.map((action) => {
                   const typedAction = action as RuntimeApprovalAction;
                   return (
@@ -186,7 +232,7 @@ function StepsTable({ steps }: { steps: StepView[] }) {
             <span className={`status-pill status-${step.status}`}>
               {statusLabels[step.status] ?? step.status}
             </span>
-            <span className="meta-chip">{step.risk_level}</span>
+            <span className="meta-chip">{riskLevelLabels[step.risk_level] ?? step.risk_level}</span>
           </div>
         </article>
       ))}
@@ -196,7 +242,7 @@ function StepsTable({ steps }: { steps: StepView[] }) {
 
 function RiskFlagList({ risks }: { risks: RiskFlagView[] }) {
   if (risks.length === 0) {
-    return <p className="empty-state">No risk telemetry recorded for this task.</p>;
+    return <p className="empty-state">이 작업에는 기록된 위험 신호가 없습니다.</p>;
   }
 
   return (
@@ -209,7 +255,7 @@ function RiskFlagList({ risks }: { risks: RiskFlagView[] }) {
           </div>
           <div className="data-row-side">
             <span className={`risk-pill risk-${risk.risk_level}`}>
-              {risk.risk_level.toUpperCase()}
+              {riskLevelLabels[risk.risk_level] ?? risk.risk_level}
             </span>
           </div>
         </article>
@@ -226,7 +272,7 @@ function TimelineList({ events }: { events: TimelineEventView[] }) {
           <div className="timeline-marker" />
           <div className="timeline-content">
             <div className="timeline-top">
-              <strong>{event.name}</strong>
+              <strong>{eventLabels[event.name] ?? event.name}</strong>
               <span>{event.timestamp}</span>
             </div>
             <p>{event.summary}</p>
@@ -243,11 +289,11 @@ function AuditList({ records }: { records: AuditRecordView[] }) {
       {records.map((record) => (
         <article key={record.id} className="data-row">
           <div className="data-row-main">
-            <strong>{record.action}</strong>
+            <strong>{eventLabels[record.action] ?? record.action}</strong>
             <p>{record.summary}</p>
           </div>
           <div className="data-row-side">
-            <span className="meta-chip">{record.channel}</span>
+            <span className="meta-chip">{channelLabels[record.channel] ?? record.channel}</span>
           </div>
         </article>
       ))}
@@ -261,7 +307,7 @@ function ApprovalList({
   approvals: TaskDetailView['approvals'];
 }) {
   if (approvals.length === 0) {
-    return <p className="empty-state">No approval history recorded for this task.</p>;
+    return <p className="empty-state">이 작업에는 승인 이력이 없습니다.</p>;
   }
 
   return (
@@ -285,29 +331,29 @@ function ApprovalList({
 
 function Overview({ detail }: { detail: TaskDetailView }) {
   return (
-    <section className="overview-band" aria-label="Task Overview" data-testid="task-overview">
+    <section className="overview-band" aria-label="작업 개요" data-testid="task-overview">
       <div>
-        <p className="eyebrow">Selected Task</p>
+        <p className="eyebrow">선택한 작업</p>
         <h1 data-testid="selected-task-title">{detail.task.title}</h1>
         <p className="overview-copy" data-testid="selected-task-summary">{detail.task.summary}</p>
       </div>
-      <div className="overview-metrics" role="list" aria-label="Task metrics">
+      <div className="overview-metrics" role="list" aria-label="작업 지표">
         <div className="metric">
-          <span>Status</span>
+          <span>상태</span>
           <strong data-testid="selected-task-status">
             {statusLabels[detail.task.status] ?? detail.task.status}
           </strong>
         </div>
         <div className="metric">
-          <span>Approvals</span>
+          <span>승인</span>
           <strong>{detail.approvals.length}</strong>
         </div>
         <div className="metric">
-          <span>Risk Flags</span>
+          <span>위험 신호</span>
           <strong>{detail.risk_flags.length}</strong>
         </div>
         <div className="metric">
-          <span>Events</span>
+          <span>이벤트</span>
           <strong>{detail.timeline.length}</strong>
         </div>
       </div>
@@ -324,8 +370,11 @@ export default function App() {
   const [selectedTaskId, setSelectedTaskId] = useState(() => fallbackCommandCenterState.taskItems[0]?.id ?? '');
   const [busyApprovalId, setBusyApprovalId] = useState<string | null>(null);
   const [isResetting, setIsResetting] = useState(false);
+  const [remoteCommandText, setRemoteCommandText] = useState('/task 이 저장소에서 인증 흐름을 정리해줘');
+  const [isSubmittingRemoteCommand, setIsSubmittingRemoteCommand] = useState(false);
+  const [lastRemoteReceipt, setLastRemoteReceipt] = useState<RemoteCommandReceipt | null>(null);
   const [runtimeMode, setRuntimeMode] = useState<'api' | 'snapshot'>('snapshot');
-  const [bannerMessage, setBannerMessage] = useState('Live API not connected yet. Showing generated runtime snapshot.');
+  const [bannerMessage, setBannerMessage] = useState('라이브 API가 아직 연결되지 않아 생성된 런타임 스냅샷을 보여주고 있습니다.');
 
   useEffect(() => {
     let active = true;
@@ -344,14 +393,14 @@ export default function App() {
         });
         setSelectedTaskId((current) => current || state.taskItems[0]?.id || '');
         setRuntimeMode('api');
-        setBannerMessage('Live dev runtime connected. Approval actions now use the orchestrator flow.');
+        setBannerMessage('라이브 개발 런타임에 연결되었습니다. 이제 승인 작업이 실제 오케스트레이터 흐름으로 동작합니다.');
       } catch {
         if (!active) {
           return;
         }
 
         setRuntimeMode('snapshot');
-        setBannerMessage('API unavailable, so the screen is using the generated runtime snapshot.');
+        setBannerMessage('API에 연결할 수 없어 생성된 런타임 스냅샷으로 화면을 표시하고 있습니다.');
       }
     })();
 
@@ -383,18 +432,18 @@ export default function App() {
       setRuntimeMode('api');
       setBannerMessage(
         action === 'approve'
-          ? 'Approval resolved through the orchestrator. The blocked step resumed successfully.'
+          ? '오케스트레이터를 통해 승인이 처리되었습니다. 차단된 단계가 정상적으로 다시 실행되었습니다.'
           : action === 'deny'
-            ? 'Approval resolved through the orchestrator. The blocked step stayed closed.'
+            ? '오케스트레이터를 통해 거부가 처리되었습니다. 차단된 단계는 그대로 유지됩니다.'
             : action === 'cancel_task'
-              ? 'Task canceled through the orchestrator. Pending approval expired and remaining steps were skipped.'
-              : 'Change request recorded. The approval is still pending until the task is revised and reviewed again.',
+              ? '오케스트레이터를 통해 작업이 취소되었습니다. 대기 중이던 승인은 만료되고 남은 단계는 건너뜁니다.'
+              : '수정 요청이 기록되었습니다. 작업을 수정하고 다시 검토하기 전까지 승인은 계속 대기 상태입니다.',
       );
     } catch (error) {
       setBannerMessage(
         error instanceof Error
-          ? `Approval action failed: ${error.message}`
-          : 'Approval action failed.',
+          ? `승인 작업 처리에 실패했습니다: ${error.message}`
+          : '승인 작업 처리에 실패했습니다.',
       );
     } finally {
       setBusyApprovalId(null);
@@ -414,16 +463,50 @@ export default function App() {
       setSelectedTaskId(nextState.taskItems[0]?.id ?? '');
       setRuntimeMode('api');
       setBannerMessage(
-        'Live dev runtime reset. You can now test approve, deny, request changes, and cancel from a clean state.',
+        '라이브 개발 런타임을 초기화했습니다. 이제 깨끗한 상태에서 승인, 거부, 수정 요청, 작업 취소를 다시 테스트할 수 있습니다.',
       );
     } catch (error) {
       setBannerMessage(
         error instanceof Error
-          ? `Demo reset failed: ${error.message}`
-          : 'Demo reset failed.',
+          ? `데모 초기화에 실패했습니다: ${error.message}`
+          : '데모 초기화에 실패했습니다.',
       );
     } finally {
       setIsResetting(false);
+    }
+  };
+
+  const handleRemoteCommandSubmit = async () => {
+    setIsSubmittingRemoteCommand(true);
+
+    try {
+      const receipt = await submitRemoteCommand({
+        text: remoteCommandText,
+        actor_id: 'remote_web_user',
+        channel: 'web',
+      });
+      setLastRemoteReceipt(receipt);
+
+      const nextState = await fetchCommandCenterState();
+      setCommandCenterState({
+        taskItems: sortTaskItems(nextState.taskItems),
+        approvalQueue: nextState.approvalQueue,
+        taskDetails: nextState.taskDetails,
+      });
+
+      if (receipt.task_id) {
+        setSelectedTaskId(receipt.task_id);
+      }
+
+      setBannerMessage(receipt.summary);
+    } catch (error) {
+      setBannerMessage(
+        error instanceof Error
+          ? `원격 명령 전송에 실패했습니다: ${error.message}`
+          : '원격 명령 전송에 실패했습니다.',
+      );
+    } finally {
+      setIsSubmittingRemoteCommand(false);
     }
   };
 
@@ -431,11 +514,11 @@ export default function App() {
     return (
       <div className="app-shell">
         <main className="dashboard">
-          <section className="overview-band" aria-label="Task Overview">
+          <section className="overview-band" aria-label="작업 개요">
             <div>
-              <p className="eyebrow">Selected Task</p>
-              <h1>No tasks available</h1>
-              <p className="overview-copy">Run the command center demo generator to populate runtime state.</p>
+              <p className="eyebrow">선택한 작업</p>
+              <h1>표시할 작업이 없습니다</h1>
+              <p className="overview-copy">명령 센터 데모 생성기를 실행해 런타임 상태를 채워주세요.</p>
             </div>
           </section>
         </main>
@@ -446,15 +529,15 @@ export default function App() {
   return (
       <div className="app-shell">
       <main className="dashboard">
-        <section className="panel runtime-banner" aria-label="Runtime mode" data-testid="runtime-banner">
+        <section className="panel runtime-banner" aria-label="런타임 모드" data-testid="runtime-banner">
           <div className="panel-heading">
             <div>
-              <p className="eyebrow">Runtime</p>
-              <h2>{runtimeMode === 'api' ? 'Live Dev Runtime' : 'Generated Snapshot'}</h2>
+              <p className="eyebrow">런타임</p>
+              <h2>{runtimeMode === 'api' ? '라이브 개발 런타임' : '생성된 스냅샷'}</h2>
             </div>
             <div className="runtime-actions">
               <span className={`summary-chip ${runtimeMode === 'api' ? '' : 'attention'}`}>
-                {runtimeMode === 'api' ? 'Connected' : 'Fallback'}
+                {runtimeMode === 'api' ? '연결됨' : '대체 모드'}
               </span>
               <button
                 type="button"
@@ -463,12 +546,54 @@ export default function App() {
                 disabled={runtimeMode !== 'api' || isResetting}
                 data-testid="reset-demo-button"
               >
-                {isResetting ? 'Resetting...' : 'Reset Demo'}
+                {isResetting ? '초기화 중...' : '데모 초기화'}
               </button>
             </div>
           </div>
           <div className="section-body">
             <p className="overview-copy" data-testid="runtime-banner-message">{bannerMessage}</p>
+          </div>
+        </section>
+
+        <section className="panel runtime-banner" aria-label="원격 명령">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">원격 명령</p>
+              <h2>모바일/Telegram 명령 시뮬레이션</h2>
+            </div>
+            <span className="summary-chip">로컬 에이전트 채널</span>
+          </div>
+          <div className="section-body remote-command-body">
+            <p className="overview-copy">
+              이후 Telegram이 붙더라도 같은 명령 계약을 사용합니다. 지금은 여기서 원격 명령을 바로 보낼 수 있습니다.
+            </p>
+            <label className="remote-command-field">
+              <span>명령</span>
+              <textarea
+                value={remoteCommandText}
+                onChange={(event) => setRemoteCommandText(event.target.value)}
+                rows={3}
+                data-testid="remote-command-input"
+              />
+            </label>
+            <div className="remote-command-actions">
+              <button
+                type="button"
+                className="iconless-button"
+                onClick={handleRemoteCommandSubmit}
+                disabled={runtimeMode !== 'api' || isSubmittingRemoteCommand}
+                data-testid="remote-command-submit"
+              >
+                {isSubmittingRemoteCommand ? '전송 중...' : '원격 명령 보내기'}
+              </button>
+              <span className="meta-chip">예: `/task 인증 오류를 수정해줘`, `/status task_...`</span>
+            </div>
+            {lastRemoteReceipt ? (
+              <div className="remote-command-receipt" data-testid="remote-command-receipt">
+                <strong>{lastRemoteReceipt.status === 'accepted' ? '수락됨' : '거부됨'}</strong>
+                <p>{lastRemoteReceipt.summary}</p>
+              </div>
+            ) : null}
           </div>
         </section>
 
@@ -491,33 +616,33 @@ export default function App() {
           </div>
 
           <div className="content-column">
-            <DetailSection title="Plan and Steps">
+            <DetailSection title="계획과 단계">
               <div className="plan-summary">
                 <div className="plan-chip">
-                  <span>Plan</span>
+                  <span>계획</span>
                   <strong>{selectedDetail.plan.title}</strong>
                 </div>
                 <div className="plan-chip">
-                  <span>State</span>
+                  <span>상태</span>
                   <strong>{statusLabels[selectedDetail.plan.status] ?? selectedDetail.plan.status}</strong>
                 </div>
               </div>
               <StepsTable steps={selectedDetail.steps} />
             </DetailSection>
 
-            <DetailSection title="Approvals">
+            <DetailSection title="승인 이력">
               <ApprovalList approvals={selectedDetail.approvals} />
             </DetailSection>
 
-            <DetailSection title="Risk Flags">
+            <DetailSection title="위험 신호">
               <RiskFlagList risks={selectedDetail.risk_flags} />
             </DetailSection>
 
-            <DetailSection title="Timeline">
+            <DetailSection title="타임라인">
               <TimelineList events={selectedDetail.timeline} />
             </DetailSection>
 
-            <DetailSection title="Audit Records">
+            <DetailSection title="감사 기록">
               <AuditList records={selectedDetail.audit_records} />
             </DetailSection>
           </div>

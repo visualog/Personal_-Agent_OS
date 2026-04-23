@@ -83,6 +83,21 @@ export type CommandCenterState = {
 
 export type RuntimeApprovalAction = 'approve' | 'deny' | 'request_changes' | 'cancel_task';
 
+export type RemoteCommandReceipt = {
+  command: {
+    channel: 'telegram' | 'web' | 'cli';
+    actor_id: string;
+    text: string;
+    intent: 'create_task' | 'get_status' | 'approve' | 'deny' | 'cancel';
+    args: Record<string, string>;
+  };
+  status: 'accepted' | 'rejected';
+  reasons: readonly string[];
+  task_id?: string;
+  approval_id?: string;
+  summary: string;
+};
+
 export const fallbackCommandCenterState: CommandCenterState = {
   taskItems: generatedCommandCenterData.taskItems as TaskItem[],
   approvalQueue: generatedCommandCenterData.approvalQueue as ApprovalQueueItem[],
@@ -126,4 +141,24 @@ export async function resolveApprovalAction(
   }
 
   return response.json() as Promise<CommandCenterState>;
+}
+
+export async function submitRemoteCommand(input: {
+  text: string;
+  actor_id: string;
+  channel?: 'telegram' | 'web' | 'cli';
+}): Promise<RemoteCommandReceipt> {
+  const response = await fetch('/api/remote/commands', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to submit remote command: ${response.status}`);
+  }
+
+  return response.json() as Promise<RemoteCommandReceipt>;
 }

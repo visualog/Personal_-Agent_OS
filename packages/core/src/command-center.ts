@@ -126,7 +126,7 @@ export class InMemoryCommandCenter {
   listApprovalQueue(): readonly CommandCenterApprovalCard[] {
     return this.approvalStore.listPending().map((approval) => {
       const view = this.readModel.getTaskRuntimeView(approval.task_id);
-      const taskTitle = view.task?.title ?? "Pending Task";
+      const taskTitle = view.task?.title ?? "대기 중인 작업";
       return {
         approval_id: approval.id,
         task_id: approval.task_id,

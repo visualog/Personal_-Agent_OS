@@ -18,3 +18,4 @@ export * from "./read-model.js";
 export * from "./memory-api.js";
 export * from "./runtime-control.js";
 export * from "./command-center.js";
+export * from "./remote-control.js";

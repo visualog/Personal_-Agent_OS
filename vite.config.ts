@@ -40,6 +40,53 @@ function commandCenterDemoApiPlugin() {
           return;
         }
 
+        if (req.method === 'GET' && pathname === '/api/remote/tasks') {
+          const runtime = await getCommandCenterDemoRuntime();
+          const tasks = await runtime.listRemoteTasks();
+          res.setHeader('content-type', 'application/json');
+          res.end(JSON.stringify({ tasks }));
+          return;
+        }
+
+        if (req.method === 'GET' && pathname.startsWith('/api/remote/tasks/')) {
+          const taskId = pathname.split('/').at(-1);
+          if (!taskId) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: 'task id required' }));
+            return;
+          }
+
+          const runtime = await getCommandCenterDemoRuntime();
+          const detail = await runtime.getRemoteTask(taskId);
+          res.setHeader('content-type', 'application/json');
+          res.end(JSON.stringify({ task: detail }));
+          return;
+        }
+
+        if (req.method === 'POST' && pathname === '/api/remote/commands') {
+          const rawBody = await readRequestBody(req);
+          const body = rawBody
+            ? JSON.parse(rawBody) as { text?: string; actor_id?: string; channel?: 'telegram' | 'web' | 'cli' }
+            : {};
+
+          if (!body.text || !body.actor_id) {
+            res.statusCode = 400;
+            res.setHeader('content-type', 'application/json');
+            res.end(JSON.stringify({ error: 'text and actor_id required' }));
+            return;
+          }
+
+          const runtime = await getCommandCenterDemoRuntime();
+          const receipt = await runtime.submitRemoteCommand({
+            text: body.text,
+            actor_id: body.actor_id,
+            channel: body.channel ?? 'web',
+          });
+          res.setHeader('content-type', 'application/json');
+          res.end(JSON.stringify(receipt));
+          return;
+        }
+
         if (req.method === 'POST' && pathname.startsWith('/api/command-center/approvals/')) {
           const approvalId = pathname.split('/').at(-1);
           if (!approvalId) {

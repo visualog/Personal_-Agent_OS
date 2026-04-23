@@ -14,14 +14,14 @@ async function withCommandCenterPage(run: (page: Page) => Promise<void>): Promis
       await page.goto(baseUrl, { waitUntil: 'networkidle' });
     } catch {
       throw new Error(
-        `Command Center dev server is not reachable at ${baseUrl}. Start it with "npm run dev:web -- --host 127.0.0.1 --port 4173" before running UI regression tests.`,
+        `명령 센터 개발 서버에 ${baseUrl}로 연결할 수 없습니다. UI 회귀 테스트를 실행하기 전에 "npm run dev:web -- --host 127.0.0.1 --port 4173" 명령으로 서버를 먼저 실행하세요.`,
       );
     }
 
     await page.evaluate(async () => {
       const response = await fetch('/api/command-center/reset', { method: 'POST' });
       if (!response.ok) {
-        throw new Error(`Failed to reset command center runtime: ${response.status}`);
+        throw new Error(`명령 센터 런타임 초기화에 실패했습니다: ${response.status}`);
       }
     });
     await page.goto(baseUrl, { waitUntil: 'networkidle' });
@@ -43,13 +43,13 @@ test('approve completes the selected task and clears the queue', async () => {
     await clickFirstApprovalAction(page, 'approve');
 
     await page.waitForFunction(
-      () => document.querySelector('[data-testid="runtime-banner-message"]')?.textContent?.includes('resumed successfully'),
+      () => document.querySelector('[data-testid="runtime-banner-message"]')?.textContent?.includes('정상적으로 다시 실행되었습니다'),
     );
     await page.waitForFunction(
-      () => document.querySelector('[data-testid="selected-task-status"]')?.textContent?.includes('Completed'),
+      () => document.querySelector('[data-testid="selected-task-status"]')?.textContent?.includes('완료'),
     );
 
-    assert.equal(await page.locator('[data-testid="selected-task-status"]').textContent(), 'Completed');
+    assert.equal(await page.locator('[data-testid="selected-task-status"]').textContent(), '완료');
     assert.equal(await page.locator('[data-testid^="approval-item-"]').count(), 0);
   });
 });
@@ -59,13 +59,13 @@ test('deny closes the blocked step and clears the queue', async () => {
     await clickFirstApprovalAction(page, 'deny');
 
     await page.waitForFunction(
-      () => document.querySelector('[data-testid="runtime-banner-message"]')?.textContent?.includes('stayed closed'),
+      () => document.querySelector('[data-testid="runtime-banner-message"]')?.textContent?.includes('그대로 유지됩니다'),
     );
 
     assert.equal(await page.locator('[data-testid^="approval-item-"]').count(), 0);
     const summary = await page.locator('[data-testid="selected-task-summary"]').textContent();
     assert.ok(summary);
-    assert.match(summary, /policy risk signals|approval/);
+    assert.match(summary, /정책 위험 신호|승인/);
   });
 });
 
@@ -74,19 +74,19 @@ test('request changes keeps the approval pending and adds a review note', async 
     await clickFirstApprovalAction(page, 'request_changes');
 
     await page.waitForFunction(
-      () => document.querySelector('[data-testid="runtime-banner-message"]')?.textContent?.includes('Change request recorded'),
+      () => document.querySelector('[data-testid="runtime-banner-message"]')?.textContent?.includes('수정 요청이 기록되었습니다'),
     );
 
     const approvalSummary = await page.locator('[data-testid^="approval-item-"]').first().textContent();
     const taskSummary = await page.locator('[data-testid="selected-task-summary"]').textContent();
     const timelineText = await page.locator('.timeline-list').textContent();
-    const auditText = await page.getByLabel('Audit Records').textContent();
+    const auditText = await page.getByLabel('감사 기록').textContent();
 
-    assert.ok(approvalSummary?.includes('Changes requested before approval.'));
-    assert.equal(await page.locator('[data-testid="selected-task-status"]').textContent(), 'Waiting Approval');
-    assert.ok(taskSummary?.includes('change request note pending before approval'));
-    assert.ok(timelineText?.includes('step.changes_requested'));
-    assert.ok(auditText?.includes('step.changes_requested'));
+    assert.ok(approvalSummary?.includes('승인 전에 수정 요청이 기록되었습니다'));
+    assert.equal(await page.locator('[data-testid="selected-task-status"]').textContent(), '승인 대기');
+    assert.ok(taskSummary?.includes('수정 요청 메모'));
+    assert.ok(timelineText?.includes('수정 요청'));
+    assert.ok(auditText?.includes('수정 요청'));
   });
 });
 
@@ -95,13 +95,13 @@ test('cancel task expires approval and marks the task canceled', async () => {
     await clickFirstApprovalAction(page, 'cancel_task');
 
     await page.waitForFunction(
-      () => document.querySelector('[data-testid="runtime-banner-message"]')?.textContent?.includes('Task canceled through the orchestrator'),
+      () => document.querySelector('[data-testid="runtime-banner-message"]')?.textContent?.includes('작업이 취소되었습니다'),
     );
 
-    assert.equal(await page.locator('[data-testid="selected-task-status"]').textContent(), 'Canceled');
+    assert.equal(await page.locator('[data-testid="selected-task-status"]').textContent(), '취소됨');
     assert.equal(await page.locator('[data-testid^="approval-item-"]').count(), 0);
 
-    const planAndStepsText = await page.getByLabel('Plan and Steps').textContent();
+    const planAndStepsText = await page.getByLabel('계획과 단계').textContent();
     assert.ok(planAndStepsText?.includes('skipped'));
   });
 });

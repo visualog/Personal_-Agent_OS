@@ -28,9 +28,28 @@ const STATUS_KEYWORDS = [
   "list",
 ];
 
+const CODE_KEYWORDS = [
+  "코드",
+  "구현",
+  "수정",
+  "리팩터링",
+  "fix",
+  "implement",
+  "refactor",
+  "patch",
+  "code",
+];
+
 function hasWorkspaceReadIntent(rawRequest: string): boolean {
   const normalized = rawRequest.toLowerCase();
   return STATUS_KEYWORDS.some((keyword) =>
+    normalized.includes(keyword.toLowerCase()),
+  );
+}
+
+function hasCodeIntent(rawRequest: string): boolean {
+  const normalized = rawRequest.toLowerCase();
+  return CODE_KEYWORDS.some((keyword) =>
     normalized.includes(keyword.toLowerCase()),
   );
 }
@@ -60,8 +79,33 @@ export function createPlan(input: CreatePlanInput): PlannerResult {
   const now = input.now ?? new Date().toISOString();
   const planId = `plan_${randomUUID()}`;
   const requiresWorkspaceRead = hasWorkspaceReadIntent(input.task.raw_request);
+  const requiresCodeWrite = hasCodeIntent(input.task.raw_request);
 
-  const steps = requiresWorkspaceRead
+  const steps = requiresCodeWrite
+    ? [
+        buildStep(
+          planId,
+          "작업공간 파일 목록 확인",
+          "workspace.list_files",
+          ["workspace.read"],
+          "low",
+        ),
+        buildStep(
+          planId,
+          "작업공간 파일 읽기",
+          "workspace.read_file",
+          ["workspace.read"],
+          "low",
+        ),
+        buildStep(
+          planId,
+          "작업공간 코드 수정",
+          "workspace.write_file",
+          ["workspace.write"],
+          "high",
+        ),
+      ]
+    : requiresWorkspaceRead
     ? [
         buildStep(
           planId,
@@ -95,10 +139,19 @@ export function createPlan(input: CreatePlanInput): PlannerResult {
     };
   }
 
+  if (steps.length > 2) {
+    steps[2] = {
+      ...steps[2],
+      depends_on: [steps[1].id],
+    };
+  }
+
   const plan: Plan = {
     id: planId,
     task_id: input.task.id,
-    summary: requiresWorkspaceRead
+    summary: requiresCodeWrite
+      ? "작업공간 상태를 확인한 뒤 코드를 수정하는 초안입니다."
+      : requiresWorkspaceRead
       ? "작업공간 상태를 확인한 뒤 파일을 읽는 초안입니다."
       : "작업공간 파일 목록을 확인하는 초안입니다.",
     steps,
@@ -118,11 +171,11 @@ export function createPlan(input: CreatePlanInput): PlannerResult {
     payload: {
       plan_id: planId,
       step_count: steps.length,
-      requires_approval: false,
+      requires_approval: requiresCodeWrite,
       risk_summary: {
-        low: steps.length,
-        medium: 0,
-        high: 0,
+        low: steps.filter((step) => step.risk_level === "low").length,
+        medium: steps.filter((step) => step.risk_level === "medium").length,
+        high: steps.filter((step) => step.risk_level === "high").length,
         critical: 0,
       },
     },
