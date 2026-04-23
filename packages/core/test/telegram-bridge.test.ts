@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  createTelegramBotClient,
   formatTelegramHelpMessage,
   handleTelegramMessage,
   isTelegramUserAllowed,
   processTelegramUpdates,
+  verifyTelegramBridgeStartup,
+  verifyTelegramDaemonHealth,
   type TelegramBotClient,
 } from "../src/index.js";
 
@@ -153,4 +156,85 @@ test("formatTelegramHelpMessage documents the safety rules", () => {
   const help = formatTelegramHelpMessage("PAOS");
   assert.match(help, /위험한 작업은 승인 필요/);
   assert.match(help, /명령 범위를 벗어난 실행 금지/);
+});
+
+test("createTelegramBotClient getMe returns bot identity via fetch", async () => {
+  const requests: string[] = [];
+  const client = createTelegramBotClient({
+    token: "test-token",
+    fetch_impl: (async (input: string | URL | Request) => {
+      requests.push(String(input));
+      return new Response(JSON.stringify({
+        ok: true,
+        result: {
+          id: 123,
+          username: "paos_bot",
+          first_name: "PAOS",
+        },
+      }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+        },
+      });
+    }) as typeof fetch,
+  });
+
+  const bot = await client.getMe();
+  assert.equal(bot.username, "paos_bot");
+  assert.match(requests[0] ?? "", /getMe/);
+});
+
+test("verifyTelegramDaemonHealth reads daemon health payload", async () => {
+  const result = await verifyTelegramDaemonHealth({
+    daemon_url: "http://127.0.0.1:4180",
+    fetch_impl: (async () => new Response(JSON.stringify({
+      ok: true,
+      service: "personal-agent-os-daemon",
+    }), {
+      status: 200,
+      headers: {
+        "content-type": "application/json",
+      },
+    })) as typeof fetch,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.service, "personal-agent-os-daemon");
+});
+
+test("verifyTelegramBridgeStartup checks both bot identity and optional daemon health", async () => {
+  const client: TelegramBotClient = {
+    async getMe() {
+      return {
+        id: 123,
+        username: "paos_bot",
+        first_name: "PAOS",
+      };
+    },
+    async getUpdates() {
+      return [];
+    },
+    async sendMessage() {
+      return;
+    },
+  };
+
+  const status = await verifyTelegramBridgeStartup({
+    client,
+    daemon_url: "http://127.0.0.1:4180",
+    fetch_impl: (async () => new Response(JSON.stringify({
+      ok: true,
+      service: "personal-agent-os-daemon",
+    }), {
+      status: 200,
+      headers: {
+        "content-type": "application/json",
+      },
+    })) as typeof fetch,
+  });
+
+  assert.equal(status.ok, true);
+  assert.equal(status.bot?.username, "paos_bot");
+  assert.equal(status.daemon_health?.service, "personal-agent-os-daemon");
 });

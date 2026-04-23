@@ -1,6 +1,7 @@
 import {
   createTelegramBotClient,
   processTelegramUpdates,
+  verifyTelegramBridgeStartup,
 } from "../packages/core/src/index.js";
 import { getCommandCenterDemoRuntime } from "./command-center-demo-runtime.js";
 
@@ -67,10 +68,17 @@ async function main(): Promise<void> {
       };
   let offset = 0;
 
+  const startupStatus = await verifyTelegramBridgeStartup({
+    client,
+    daemon_url: daemonUrl,
+  });
+
   console.log("[telegram-bridge] started");
   console.log(`[telegram-bridge] allowed users: ${allowedUserIds.join(", ")}`);
+  console.log(`[telegram-bridge] bot: @${startupStatus.bot?.username ?? "unknown"} (${startupStatus.bot?.id ?? "n/a"})`);
   if (daemonUrl) {
     console.log(`[telegram-bridge] daemon target: ${daemonUrl}`);
+    console.log(`[telegram-bridge] daemon health: ${startupStatus.daemon_health?.service ?? "unknown"}`);
   } else {
     console.log("[telegram-bridge] using embedded demo runtime");
   }

@@ -24,7 +24,14 @@ export interface TelegramGetUpdatesOptions {
   readonly timeout_seconds?: number;
 }
 
+export interface TelegramBotIdentity {
+  readonly id: number;
+  readonly username?: string;
+  readonly first_name?: string;
+}
+
 export interface TelegramBotClient {
+  getMe(): Promise<TelegramBotIdentity>;
   getUpdates(options?: TelegramGetUpdatesOptions): Promise<readonly TelegramUpdate[]>;
   sendMessage(input: { chat_id: number; text: string }): Promise<void>;
 }
@@ -51,6 +58,15 @@ export interface TelegramRemoteCommandService {
 export interface TelegramBridgeConfig {
   readonly allowed_user_ids: readonly string[];
   readonly bot_name?: string;
+}
+
+export interface TelegramBridgeStartupStatus {
+  readonly ok: boolean;
+  readonly bot?: TelegramBotIdentity;
+  readonly daemon_health?: {
+    readonly ok: boolean;
+    readonly service?: string;
+  };
 }
 
 function normalizeAllowedUserIds(userIds: readonly string[]): string[] {
@@ -183,6 +199,42 @@ export async function processTelegramUpdates(input: {
   };
 }
 
+export async function verifyTelegramDaemonHealth(input: {
+  daemon_url: string;
+  fetch_impl?: typeof fetch;
+}): Promise<{ readonly ok: boolean; readonly service?: string }> {
+  const fetchImpl = input.fetch_impl ?? fetch;
+  const response = await fetchImpl(`${input.daemon_url.replace(/\/$/, "")}/health`);
+  if (!response.ok) {
+    throw new Error(`Agent daemon health check failed: ${response.status}`);
+  }
+
+  return await response.json() as {
+    readonly ok: boolean;
+    readonly service?: string;
+  };
+}
+
+export async function verifyTelegramBridgeStartup(input: {
+  client: TelegramBotClient;
+  daemon_url?: string;
+  fetch_impl?: typeof fetch;
+}): Promise<TelegramBridgeStartupStatus> {
+  const bot = await input.client.getMe();
+  const daemonHealth = input.daemon_url
+    ? await verifyTelegramDaemonHealth({
+        daemon_url: input.daemon_url,
+        fetch_impl: input.fetch_impl,
+      })
+    : undefined;
+
+  return {
+    ok: true,
+    bot,
+    daemon_health: daemonHealth,
+  };
+}
+
 export function createTelegramBotClient(input: {
   token: string;
   fetch_impl?: typeof fetch;
@@ -191,6 +243,20 @@ export function createTelegramBotClient(input: {
   const baseUrl = `https://api.telegram.org/bot${input.token}`;
 
   return {
+    async getMe() {
+      const response = await fetchImpl(`${baseUrl}/getMe`);
+      if (!response.ok) {
+        throw new Error(`Telegram getMe failed: ${response.status}`);
+      }
+
+      const payload = await response.json() as {
+        ok: boolean;
+        result: TelegramBotIdentity;
+      };
+
+      return payload.result;
+    },
+
     async getUpdates(options) {
       const params = new URLSearchParams();
       if (typeof options?.offset === "number") {
