@@ -48,6 +48,15 @@ The repo now also includes a first Telegram bridge MVP that can long-poll Telegr
 - verifies Telegram bot identity on startup
 - verifies daemon health on startup when `PAOS_AGENT_DAEMON_URL` is configured
 
+The repo now also includes a Slack bridge MVP that polls allowlisted channels and forwards command-like messages into the same local agent daemon:
+
+- `npm run start:slack-bridge`
+- requires `SLACK_BOT_TOKEN`
+- requires `SLACK_ALLOWED_USER_IDS`
+- requires `SLACK_ALLOWED_CHANNEL_IDS`
+- verifies Slack auth identity on startup
+- verifies daemon health on startup when `PAOS_AGENT_DAEMON_URL` is configured
+
 The local agent can also run as a standalone daemon instead of depending on the Vite preview server:
 
 - `npm run start:agent-daemon`

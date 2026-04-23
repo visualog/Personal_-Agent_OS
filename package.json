@@ -8,6 +8,7 @@
     "predev:web": "npm run generate:web-demo",
     "dev:web": "vite",
     "start:agent-daemon": "node --import tsx scripts/run-agent-daemon.ts",
+    "start:slack-bridge": "node --import tsx scripts/run-slack-bridge.ts",
     "start:telegram-bridge": "node --import tsx scripts/run-telegram-bridge.ts",
     "build": "tsc -p tsconfig.json",
     "prebuild:web": "npm run generate:web-demo",
