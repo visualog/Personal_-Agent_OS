@@ -4,6 +4,7 @@ import {
   verifyTelegramBridgeStartup,
 } from "../packages/core/src/index.js";
 import { getCommandCenterDemoRuntime } from "./command-center-demo-runtime.js";
+import { loadLocalEnv } from "./load-env.js";
 
 function createDaemonBackedService(daemonUrl: string) {
   return {
@@ -53,6 +54,7 @@ function readAllowedUserIds(): string[] {
 }
 
 async function main(): Promise<void> {
+  loadLocalEnv();
   const token = readRequiredEnv("TELEGRAM_BOT_TOKEN");
   const allowedUserIds = readAllowedUserIds();
   const pollIntervalMs = Number(process.env.PAOS_BRIDGE_POLL_INTERVAL_MS ?? "3000");

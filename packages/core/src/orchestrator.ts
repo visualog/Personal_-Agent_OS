@@ -245,7 +245,7 @@ export class PersonalAgentOrchestrator {
       });
       this.publishAndAudit(startedEvent);
 
-      const executionInput = this.buildExecutionInput(step, listFilesOutput, input.workspaceRoot);
+      const executionInput = this.buildExecutionInput(step, taskResult.task, listFilesOutput, input.workspaceRoot);
       const execution = await this.gateway.execute({
         action_id: actionId,
         step_id: step.id,
@@ -434,6 +434,7 @@ export class PersonalAgentOrchestrator {
 
     const stepResult = await this.executeStep({
       step,
+      task: input.task,
       taskId: input.task.id,
       workspaceRoot: input.workspaceRoot,
       listFilesOutput: undefined,
@@ -548,12 +549,14 @@ export class PersonalAgentOrchestrator {
 
   private async executeStep({
     step,
+    task,
     taskId,
     workspaceRoot,
     listFilesOutput,
     approvalGranted,
   }: {
     step: Step;
+    task: Task;
     taskId: string;
     workspaceRoot: string;
     listFilesOutput: unknown;
@@ -567,7 +570,7 @@ export class PersonalAgentOrchestrator {
     });
     this.publishAndAudit(startedEvent);
 
-    const executionInput = this.buildExecutionInput(step, listFilesOutput, workspaceRoot);
+    const executionInput = this.buildExecutionInput(step, task, listFilesOutput, workspaceRoot);
     const execution = await this.gateway.execute({
       action_id: actionId,
       step_id: step.id,
@@ -936,6 +939,7 @@ export class PersonalAgentOrchestrator {
 
   private buildExecutionInput(
     step: Step,
+    task: Task,
     listFilesOutput: unknown,
     workspaceRoot: string,
   ): unknown {
@@ -949,6 +953,31 @@ export class PersonalAgentOrchestrator {
       return {
         root: workspaceRoot,
         path: firstFilePath ?? "README.md",
+      };
+    }
+
+    if (step.tool_name === "workspace.write_file") {
+      const entries = this.extractListFilesEntries(listFilesOutput)
+        .filter((entry) => entry.type === "file")
+        .slice(0, 5)
+        .map((entry) => `- ${entry.path}`)
+        .join("\n");
+
+      return {
+        root: workspaceRoot,
+        path: `docs/agent-drafts/${task.id}.md`,
+        content: [
+          "# Agent Draft",
+          "",
+          `Task ID: ${task.id}`,
+          `Request: ${task.raw_request}`,
+          "",
+          "Candidate files:",
+          entries || "- README.md",
+          "",
+          "Next step:",
+          "- Review this draft and approve a concrete file-level implementation request.",
+        ].join("\n"),
       };
     }
 

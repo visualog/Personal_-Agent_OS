@@ -1,4 +1,4 @@
-import { readdir, readFile, stat } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { ToolDefinition } from "./domain.js";
@@ -35,6 +35,17 @@ export interface ReadWorkspaceFileOutput {
   content: string;
   bytes: number;
   truncated: boolean;
+}
+
+export interface WriteWorkspaceFileInput {
+  root: string;
+  path: string;
+  content: string;
+}
+
+export interface WriteWorkspaceFileOutput {
+  path: string;
+  bytes: number;
 }
 
 function toPosixPath(value: string): string {
@@ -171,6 +182,26 @@ export async function readWorkspaceFile(
   };
 }
 
+export async function writeWorkspaceFile(
+  input: WriteWorkspaceFileInput,
+): Promise<WriteWorkspaceFileOutput> {
+  const root = path.resolve(input.root);
+  const scope: WorkspaceScope = { root };
+  const absolutePath = resolveWorkspacePath(scope, input.path);
+
+  if (isIgnoredPath(scope, absolutePath)) {
+    throw new Error(`Workspace path is ignored: ${input.path}`);
+  }
+
+  await mkdir(path.dirname(absolutePath), { recursive: true });
+  await writeFile(absolutePath, input.content, "utf8");
+
+  return {
+    path: toPosixPath(input.path),
+    bytes: Buffer.byteLength(input.content, "utf8"),
+  };
+}
+
 export const workspaceListFilesToolDefinition: ToolDefinition = {
   name: "workspace.list_files",
   description: "List files inside an allowed workspace root.",
@@ -191,6 +222,18 @@ export const workspaceReadFileToolDefinition: ToolDefinition = {
   capabilities: ["workspace.read"],
   default_risk: "low",
   requires_approval: false,
+  sandbox: "workspace",
+  status: "enabled",
+};
+
+export const workspaceWriteFileToolDefinition: ToolDefinition = {
+  name: "workspace.write_file",
+  description: "Write a UTF-8 file inside an allowed workspace root.",
+  input_schema: { type: "object" },
+  output_schema: { type: "object" },
+  capabilities: ["workspace.write"],
+  default_risk: "high",
+  requires_approval: true,
   sandbox: "workspace",
   status: "enabled",
 };
@@ -236,6 +279,24 @@ export function createWorkspaceToolGatewayTools(
             typeof objectInput.maxBytes === "number"
               ? objectInput.maxBytes
               : undefined,
+        });
+      },
+    },
+    {
+      definition: workspaceWriteFileToolDefinition,
+      handler: async (input) => {
+        const objectInput = assertObjectInput(input);
+        if (typeof objectInput.path !== "string") {
+          throw new Error("workspace.write_file requires a string path.");
+        }
+        if (typeof objectInput.content !== "string") {
+          throw new Error("workspace.write_file requires a string content.");
+        }
+
+        return writeWorkspaceFile({
+          root: scope.root,
+          path: objectInput.path,
+          content: objectInput.content,
         });
       },
     },

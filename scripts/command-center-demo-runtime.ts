@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -229,12 +229,17 @@ function createApprovalAwareGateway(): OrchestratorToolGateway {
   };
 }
 
-async function createTempWorkspace(): Promise<string> {
+async function createWorkspaceRoot(preferredRoot?: string): Promise<{ root: string; disposable: boolean }> {
+  if (preferredRoot) {
+    await access(preferredRoot);
+    return { root: preferredRoot, disposable: false };
+  }
+
   const root = await mkdtemp(path.join(os.tmpdir(), 'paos-web-demo-'));
   await mkdir(path.join(root, 'nested'), { recursive: true });
   await writeFile(path.join(root, 'README.md'), '# Personal Agent OS\n', 'utf8');
   await writeFile(path.join(root, 'nested', 'notes.txt'), 'team notes\n', 'utf8');
-  return root;
+  return { root, disposable: true };
 }
 
 function summarizeTimelineEvent(event: Event): string {
@@ -312,6 +317,12 @@ function mapApproval(approval: Approval): GeneratedTaskDetail['approvals'][numbe
   };
 }
 
+interface CommandCenterRuntimeOptions {
+  workspaceRoot?: string;
+  seedDemoData?: boolean;
+  useDemoApprovalGateway?: boolean;
+}
+
 class CommandCenterDemoRuntime {
   private readonly taskStore = new InMemoryTaskStore();
   private readonly planStore = new InMemoryPlanStore();
@@ -319,7 +330,8 @@ class CommandCenterDemoRuntime {
   private readonly approvalStore = new InMemoryApprovalStore();
   private readonly eventBus = new InMemoryEventBus();
   private readonly auditLog = new InMemoryAuditLog();
-  private readonly workspaceRootPromise = createTempWorkspace();
+  private readonly workspaceRootPromise: Promise<string>;
+  private readonly disposeWorkspaceOnClose: Promise<boolean>;
   private readonly readModel = new InMemoryRuntimeReadModel({
     taskStore: this.taskStore,
     planStore: this.planStore,
@@ -344,16 +356,7 @@ class CommandCenterDemoRuntime {
     auditLog: this.auditLog,
     granted_capabilities: ['workspace.read'],
   });
-  private readonly approvalOrchestrator = new PersonalAgentOrchestrator({
-    taskStore: this.taskStore,
-    planStore: this.planStore,
-    stepStore: this.stepStore,
-    approvalStore: this.approvalStore,
-    eventBus: this.eventBus,
-    auditLog: this.auditLog,
-    gateway: createApprovalAwareGateway(),
-    granted_capabilities: ['workspace.read', 'workspace.write'],
-  });
+  private readonly approvalOrchestrator: PersonalAgentOrchestrator;
   private readonly deniedOrchestrator = new PersonalAgentOrchestrator({
     taskStore: this.taskStore,
     planStore: this.planStore,
@@ -366,6 +369,22 @@ class CommandCenterDemoRuntime {
   private readonly changeRequests = new Map<string, ApprovalChangeRequest[]>();
   private initialized = false;
 
+  constructor(private readonly options: CommandCenterRuntimeOptions = {}) {
+    const workspaceRootState = createWorkspaceRoot(options.workspaceRoot);
+    this.workspaceRootPromise = workspaceRootState.then((state) => state.root);
+    this.disposeWorkspaceOnClose = workspaceRootState.then((state) => state.disposable);
+    this.approvalOrchestrator = new PersonalAgentOrchestrator({
+      taskStore: this.taskStore,
+      planStore: this.planStore,
+      stepStore: this.stepStore,
+      approvalStore: this.approvalStore,
+      eventBus: this.eventBus,
+      auditLog: this.auditLog,
+      gateway: options.useDemoApprovalGateway === false ? undefined : createApprovalAwareGateway(),
+      granted_capabilities: ['workspace.read', 'workspace.write'],
+    });
+  }
+
   async init(): Promise<void> {
     if (this.initialized) {
       return;
@@ -373,26 +392,28 @@ class CommandCenterDemoRuntime {
 
     const workspaceRoot = await this.workspaceRootPromise;
 
-    await this.completedOrchestrator.run({
-      raw_request: '이 프로젝트 현재 상태를 정리하고 다음 작업을 제안해줘',
-      created_by: 'web_demo_user',
-      workspaceRoot,
-      now: '2026-04-22T14:05:00.000Z',
-    });
+    if (this.options.seedDemoData !== false) {
+      await this.completedOrchestrator.run({
+        raw_request: '이 프로젝트 현재 상태를 정리하고 다음 작업을 제안해줘',
+        created_by: 'web_demo_user',
+        workspaceRoot,
+        now: '2026-04-22T14:05:00.000Z',
+      });
 
-    await this.approvalOrchestrator.run({
-      raw_request: '어제 논의한 내용을 읽고 답장 초안을 만들어줘. 보내지는 마.',
-      created_by: 'web_demo_user',
-      workspaceRoot,
-      now: '2026-04-22T14:20:00.000Z',
-    });
+      await this.approvalOrchestrator.run({
+        raw_request: '어제 논의한 내용을 읽고 답장 초안을 만들어줘. 보내지는 마.',
+        created_by: 'web_demo_user',
+        workspaceRoot,
+        now: '2026-04-22T14:20:00.000Z',
+      });
 
-    await this.deniedOrchestrator.run({
-      raw_request: '오래된 파일을 정리해서 삭제해줘',
-      created_by: 'web_demo_user',
-      workspaceRoot,
-      now: '2026-04-22T14:30:00.000Z',
-    });
+      await this.deniedOrchestrator.run({
+        raw_request: '오래된 파일을 정리해서 삭제해줘',
+        created_by: 'web_demo_user',
+        workspaceRoot,
+        now: '2026-04-22T14:30:00.000Z',
+      });
+    }
 
     this.initialized = true;
   }
@@ -699,7 +720,9 @@ class CommandCenterDemoRuntime {
 
   async dispose(): Promise<void> {
     const workspaceRoot = await this.workspaceRootPromise;
-    await rm(workspaceRoot, { recursive: true, force: true });
+    if (await this.disposeWorkspaceOnClose) {
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
   }
 
   private getPlanByTaskId(taskId: string): Plan | null {
@@ -727,6 +750,7 @@ class CommandCenterDemoRuntime {
 }
 
 let runtimePromise: Promise<CommandCenterDemoRuntime> | null = null;
+let agentRuntimePromise: Promise<CommandCenterDemoRuntime> | null = null;
 
 export async function getCommandCenterDemoRuntime(): Promise<CommandCenterDemoRuntime> {
   if (runtimePromise === null) {
@@ -748,6 +772,22 @@ export async function resetCommandCenterDemoRuntime(): Promise<CommandCenterDemo
 
   runtimePromise = null;
   return getCommandCenterDemoRuntime();
+}
+
+export async function getAgentDaemonRuntime(): Promise<CommandCenterDemoRuntime> {
+  if (agentRuntimePromise === null) {
+    agentRuntimePromise = (async () => {
+      const runtime = new CommandCenterDemoRuntime({
+        workspaceRoot: process.env.PAOS_WORKSPACE_ROOT ?? process.cwd(),
+        seedDemoData: false,
+        useDemoApprovalGateway: false,
+      });
+      await runtime.init();
+      return runtime;
+    })();
+  }
+
+  return agentRuntimePromise;
 }
 
 export async function generateDemoState(): Promise<GeneratedCommandCenterState> {

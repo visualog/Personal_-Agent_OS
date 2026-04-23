@@ -134,6 +134,14 @@ export async function handleSlackMessage(input: {
     return { handled: false };
   }
 
+  if (!input.message.text?.trim()) {
+    return { handled: false };
+  }
+
+  if (input.message.bot_id || input.message.subtype) {
+    return { handled: false };
+  }
+
   if (!isSlackUserAllowed({
     user_id: input.message.user,
     allowed_user_ids: input.config.allowed_user_ids,
@@ -142,14 +150,6 @@ export async function handleSlackMessage(input: {
       handled: true,
       response_text: "허용되지 않은 사용자입니다. 이 에이전트는 승인된 계정만 제어할 수 있습니다.",
     };
-  }
-
-  if (!input.message.text?.trim()) {
-    return { handled: false };
-  }
-
-  if (input.message.bot_id || input.message.subtype) {
-    return { handled: false };
   }
 
   const text = input.message.text.trim();

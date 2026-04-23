@@ -1,8 +1,7 @@
 import http from "node:http";
 
 import {
-  getCommandCenterDemoRuntime,
-  resetCommandCenterDemoRuntime,
+  getAgentDaemonRuntime,
   type RuntimeApprovalAction,
 } from "./command-center-demo-runtime.js";
 
@@ -46,7 +45,7 @@ export async function handleAgentDaemonRequest(input: {
   }
 
   if (input.method === "GET" && pathname === "/api/command-center/state") {
-    const runtime = await getCommandCenterDemoRuntime();
+    const runtime = await getAgentDaemonRuntime();
     const snapshot = await runtime.getSnapshot();
     return {
       statusCode: 200,
@@ -55,7 +54,7 @@ export async function handleAgentDaemonRequest(input: {
   }
 
   if (input.method === "POST" && pathname === "/api/command-center/reset") {
-    const runtime = await resetCommandCenterDemoRuntime();
+    const runtime = await getAgentDaemonRuntime();
     const snapshot = await runtime.getSnapshot();
     return {
       statusCode: 200,
@@ -64,7 +63,7 @@ export async function handleAgentDaemonRequest(input: {
   }
 
   if (input.method === "GET" && pathname === "/api/remote/tasks") {
-    const runtime = await getCommandCenterDemoRuntime();
+    const runtime = await getAgentDaemonRuntime();
     const tasks = await runtime.listRemoteTasks();
     return {
       statusCode: 200,
@@ -81,7 +80,7 @@ export async function handleAgentDaemonRequest(input: {
       };
     }
 
-    const runtime = await getCommandCenterDemoRuntime();
+    const runtime = await getAgentDaemonRuntime();
     const task = await runtime.getRemoteTask(taskId);
     return {
       statusCode: 200,
@@ -102,7 +101,7 @@ export async function handleAgentDaemonRequest(input: {
       };
     }
 
-    const runtime = await getCommandCenterDemoRuntime();
+    const runtime = await getAgentDaemonRuntime();
     const receipt = await runtime.submitRemoteCommand({
       text,
       actor_id: actorId,
@@ -137,7 +136,7 @@ export async function handleAgentDaemonRequest(input: {
       };
     }
 
-    const runtime = await getCommandCenterDemoRuntime();
+    const runtime = await getAgentDaemonRuntime();
     const snapshot = await runtime.resolveApprovalAction(
       approvalId,
       action as RuntimeApprovalAction,

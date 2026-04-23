@@ -15,7 +15,7 @@ test("agent daemon exposes health and remote command endpoints", async () => {
     method: "POST",
     pathname: "/api/remote/commands",
     body: {
-      text: "/task 이 저장소에서 인증 흐름을 정리해줘",
+      text: "/task 이 저장소에서 로그인 오류를 수정해줘",
       actor_id: "daemon_test_user",
       channel: "cli",
     },
@@ -29,4 +29,5 @@ test("agent daemon exposes health and remote command endpoints", async () => {
   assert.equal(command.statusCode, 200);
   assert.equal(receipt.status, "accepted");
   assert.ok(receipt.task_id);
+  assert.ok(receipt.approval_id);
 });

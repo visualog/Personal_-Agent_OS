@@ -4,6 +4,7 @@ import {
   verifySlackBridgeStartup,
 } from "../packages/core/src/index.js";
 import { getCommandCenterDemoRuntime } from "./command-center-demo-runtime.js";
+import { loadLocalEnv } from "./load-env.js";
 
 function readRequiredEnv(name: string): string {
   const value = process.env[name]?.trim();
@@ -52,6 +53,7 @@ function createDaemonBackedService(daemonUrl: string) {
 }
 
 async function main(): Promise<void> {
+  loadLocalEnv();
   const token = readRequiredEnv("SLACK_BOT_TOKEN");
   const allowedUserIds = readCsvEnv("SLACK_ALLOWED_USER_IDS");
   const allowedChannelIds = readCsvEnv("SLACK_ALLOWED_CHANNEL_IDS");
@@ -87,13 +89,19 @@ async function main(): Promise<void> {
   while (true) {
     try {
       for (const channelId of allowedChannelIds) {
+        const channelCursor = lastSeenTsByChannel.get(channelId);
         const messages = await client.conversationsHistory({
           channel: channelId,
-          oldest: lastSeenTsByChannel.get(channelId),
+          oldest: channelCursor,
           limit: 20,
         });
 
         const sortedMessages = [...messages].sort((left, right) => left.ts.localeCompare(right.ts));
+        if (!channelCursor && sortedMessages.length > 0) {
+          lastSeenTsByChannel.set(channelId, sortedMessages.at(-1)?.ts ?? "");
+          continue;
+        }
+
         for (const message of sortedMessages) {
           const result = await handleSlackMessage({
             message,

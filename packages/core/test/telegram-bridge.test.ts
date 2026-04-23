@@ -100,6 +100,12 @@ test("handleTelegramMessage forwards allowed remote commands and formats task me
 test("processTelegramUpdates sends replies for handled messages and returns the last update id", async () => {
   const sentMessages: Array<{ chat_id: number; text: string }> = [];
   const client: TelegramBotClient = {
+    async getMe() {
+      return {
+        id: 123,
+        username: "paos_bot",
+      };
+    },
     async getUpdates() {
       return [];
     },
