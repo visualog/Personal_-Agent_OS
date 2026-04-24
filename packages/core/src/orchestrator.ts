@@ -988,7 +988,7 @@ export class PersonalAgentOrchestrator {
         .map((entry) => `- ${entry.path}`)
         .join("\n");
       const applyInstruction = explicitTargetPath
-        ? `- 승인 후 ${explicitTargetPath}에 제한된 append 수정이 적용됩니다.`
+        ? `- patch 제안 검토 후 승인하면 ${explicitTargetPath}에 제한된 append patch가 적용됩니다.`
         : "- 실제 파일 수정을 원하면 다음 요청에 대상 파일 경로를 포함해 주세요. 예: packages/core/src/orchestrator.ts";
 
       return {
@@ -1008,7 +1008,7 @@ export class PersonalAgentOrchestrator {
           "",
           "Planned change:",
           explicitTargetPath
-            ? `- ${explicitTargetPath}에 승인 기반 수정 메모를 append`
+            ? `- ${explicitTargetPath}에 승인 기반 patch 제안`
             : "- 우선 제안 초안만 생성",
           "",
           "Next step:",
@@ -1017,15 +1017,29 @@ export class PersonalAgentOrchestrator {
       };
     }
 
-    if (step.tool_name === "workspace.apply_file_edit") {
+    if (step.tool_name === "workspace.write_patch") {
       const explicitTargetPath = this.findRequestedWorkspacePath(task.raw_request, entries);
       const targetPath = explicitTargetPath ?? "README.md";
+      const appendContent = this.buildApprovedChangeBlock(task, targetPath);
+      const patch = this.buildAppendPatch(targetPath, appendContent);
+
+      return {
+        root: workspaceRoot,
+        path: `docs/agent-drafts/${task.id}.patch`,
+        content: patch,
+      };
+    }
+
+    if (step.tool_name === "workspace.apply_patch") {
+      const explicitTargetPath = this.findRequestedWorkspacePath(task.raw_request, entries);
+      const targetPath = explicitTargetPath ?? "README.md";
+      const appendContent = this.buildApprovedChangeBlock(task, targetPath);
 
       return {
         root: workspaceRoot,
         path: targetPath,
-        mode: "append",
-        content: this.buildApprovedChangeBlock(task, targetPath),
+        patch: this.buildAppendPatch(targetPath, appendContent),
+        append_content: appendContent,
       };
     }
 
@@ -1138,6 +1152,21 @@ export class PersonalAgentOrchestrator {
       `// PAOS approved change note (${task.id})`,
       `// Request: ${task.raw_request}`,
       "// Follow-up: replace this note with a concrete implementation patch.",
+    ].join("\n");
+  }
+
+  private buildAppendPatch(targetPath: string, appendContent: string): string {
+    const addedLines = appendContent
+      .split("\n")
+      .map((line) => `+${line}`)
+      .join("\n");
+
+    return [
+      `--- a/${targetPath}`,
+      `+++ b/${targetPath}`,
+      "@@",
+      addedLines,
+      "",
     ].join("\n");
   }
 }

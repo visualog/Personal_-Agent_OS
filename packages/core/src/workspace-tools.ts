@@ -50,6 +50,19 @@ export interface WriteWorkspaceFileOutput {
   mode: "replace" | "append";
 }
 
+export interface ApplyWorkspacePatchInput {
+  root: string;
+  path: string;
+  patch: string;
+  append_content: string;
+}
+
+export interface ApplyWorkspacePatchOutput {
+  path: string;
+  patch_bytes: number;
+  bytes_appended: number;
+}
+
 function toPosixPath(value: string): string {
   return value.split(path.sep).join("/");
 }
@@ -220,6 +233,23 @@ export async function writeWorkspaceFile(
   };
 }
 
+export async function applyWorkspacePatch(
+  input: ApplyWorkspacePatchInput,
+): Promise<ApplyWorkspacePatchOutput> {
+  const output = await writeWorkspaceFile({
+    root: input.root,
+    path: input.path,
+    content: input.append_content,
+    mode: "append",
+  });
+
+  return {
+    path: output.path,
+    patch_bytes: Buffer.byteLength(input.patch, "utf8"),
+    bytes_appended: output.bytes,
+  };
+}
+
 export const workspaceListFilesToolDefinition: ToolDefinition = {
   name: "workspace.list_files",
   description: "List files inside an allowed workspace root.",
@@ -268,9 +298,21 @@ export const workspaceWriteDraftToolDefinition: ToolDefinition = {
   status: "enabled",
 };
 
-export const workspaceApplyFileEditToolDefinition: ToolDefinition = {
-  name: "workspace.apply_file_edit",
-  description: "Apply an approved append-only edit to a workspace file.",
+export const workspaceWritePatchToolDefinition: ToolDefinition = {
+  name: "workspace.write_patch",
+  description: "Write a low-risk patch proposal inside docs/agent-drafts.",
+  input_schema: { type: "object" },
+  output_schema: { type: "object" },
+  capabilities: ["workspace.write"],
+  default_risk: "low",
+  requires_approval: false,
+  sandbox: "workspace",
+  status: "enabled",
+};
+
+export const workspaceApplyPatchToolDefinition: ToolDefinition = {
+  name: "workspace.apply_patch",
+  description: "Apply an approved append-only patch to a workspace file.",
   input_schema: { type: "object" },
   output_schema: { type: "object" },
   capabilities: ["workspace.write"],
@@ -370,21 +412,46 @@ export function createWorkspaceToolGatewayTools(
       },
     },
     {
-      definition: workspaceApplyFileEditToolDefinition,
+      definition: workspaceWritePatchToolDefinition,
       handler: async (input) => {
         const objectInput = assertObjectInput(input);
         if (typeof objectInput.path !== "string") {
-          throw new Error("workspace.apply_file_edit requires a string path.");
+          throw new Error("workspace.write_patch requires a string path.");
+        }
+        if (!objectInput.path.startsWith("docs/agent-drafts/")) {
+          throw new Error("workspace.write_patch must write inside docs/agent-drafts/.");
         }
         if (typeof objectInput.content !== "string") {
-          throw new Error("workspace.apply_file_edit requires a string content.");
+          throw new Error("workspace.write_patch requires a string content.");
         }
 
         return writeWorkspaceFile({
           root: scope.root,
           path: objectInput.path,
           content: objectInput.content,
-          mode: readWriteMode(objectInput),
+          mode: "replace",
+        });
+      },
+    },
+    {
+      definition: workspaceApplyPatchToolDefinition,
+      handler: async (input) => {
+        const objectInput = assertObjectInput(input);
+        if (typeof objectInput.path !== "string") {
+          throw new Error("workspace.apply_patch requires a string path.");
+        }
+        if (typeof objectInput.patch !== "string") {
+          throw new Error("workspace.apply_patch requires a string patch.");
+        }
+        if (typeof objectInput.append_content !== "string") {
+          throw new Error("workspace.apply_patch requires a string append_content.");
+        }
+
+        return applyWorkspacePatch({
+          root: scope.root,
+          path: objectInput.path,
+          patch: objectInput.patch,
+          append_content: objectInput.append_content,
         });
       },
     },

@@ -53,10 +53,32 @@ SLACK_ALLOWED_CHANNEL_IDS=C0123456789
 - `/deny <approval_id>`
 - `/cancel <task_id>`
 
+Slack에서 `/`로 시작하는 메시지는 Slack 자체 slash command로 해석될 수 있다. 현재 bridge는 channel message polling 기반이므로, 수동 테스트에서는 앞에 공백을 붙인 형태가 안정적이다.
+
+```text
+ /task README.md 파일에서 로그인 오류 수정 방향을 정리해줘
+```
+
+## Coding Flow
+
+파일 경로가 없는 코딩 요청:
+
+- `docs/agent-drafts/<task-id>.md` 제안 초안 생성
+- 실제 source file 수정 없음
+- approval 없음
+
+파일 경로가 있는 코딩 요청:
+
+- `docs/agent-drafts/<task-id>.patch` patch 제안 생성
+- 실제 source file 수정 전 approval 요청
+- `/approve <approval_id>` 후 `workspace.apply_patch` 실행
+- 현재 patch 적용은 append-only로 제한
+
 ## Safety Notes
 
 - 허용되지 않은 사용자는 초입에서 거부된다.
 - 허용되지 않은 채널은 아예 처리하지 않는다.
 - Slack 채널도 `allow_execute`, `allow_network`를 기본적으로 열 수 없다.
 - 코딩 요청은 쓰기 가능 범위를 가질 수 있지만, 위험도는 planner/policy/orchestrator가 다시 판정한다.
+- 실제 파일 적용은 patch 제안 생성과 승인 단계를 거쳐야 한다.
 - 브리지 시작 시 auth identity와 daemon health를 먼저 확인해서 설정 오류를 초기에 드러낸다.

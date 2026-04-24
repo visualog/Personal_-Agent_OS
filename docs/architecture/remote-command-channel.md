@@ -77,8 +77,10 @@
 현재 dev runtime은 다음처럼 작동한다.
 
 - 일반 task는 read 중심 orchestrator로 실행된다.
-- 코딩 task는 write-capable orchestrator로 들어가며 승인 대기 상태를 만들 수 있다.
+- 경로가 없는 코딩 task는 `docs/agent-drafts/<task-id>.md` 제안 초안을 생성한다.
+- 경로가 있는 코딩 task는 `docs/agent-drafts/<task-id>.patch` patch 제안을 생성하고 승인 대기 상태를 만들 수 있다.
 - `approve` / `deny` / `cancel`은 기존 approval/task 제어 경로를 재사용한다.
+- 승인 후 실제 적용은 현재 append-only patch로 제한된다.
 
 즉, 지금의 웹 입력창은 최종 UI가 아니라, 나중에 Telegram이 그대로 사용할 명령 계약을 검증하기 위한 테스트 채널이다.
 

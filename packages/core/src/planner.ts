@@ -129,8 +129,15 @@ export function createPlan(input: CreatePlanInput): PlannerResult {
           ? [
               buildStep(
                 planId,
-                "승인 후 파일 수정 적용",
-                "workspace.apply_file_edit",
+                "수정 patch 제안 작성",
+                "workspace.write_patch",
+                ["workspace.write"],
+                "low",
+              ),
+              buildStep(
+                planId,
+                "승인 후 patch 적용",
+                "workspace.apply_patch",
                 ["workspace.write"],
                 "high",
               ),
@@ -182,6 +189,13 @@ export function createPlan(input: CreatePlanInput): PlannerResult {
     steps[3] = {
       ...steps[3],
       depends_on: [steps[2].id],
+    };
+  }
+
+  if (steps.length > 4) {
+    steps[4] = {
+      ...steps[4],
+      depends_on: [steps[3].id],
     };
   }
 

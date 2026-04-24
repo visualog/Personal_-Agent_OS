@@ -110,7 +110,8 @@ test("coding task with explicit target path requests approval for apply step and
   assert.ok(approval);
   assert.equal(result.task.status, "waiting_approval");
   assert.ok(result.steps.some((step) => step.step.tool_name === "workspace.write_draft"));
-  assert.ok(result.steps.some((step) => step.step.tool_name === "workspace.apply_file_edit"));
+  assert.ok(result.steps.some((step) => step.step.tool_name === "workspace.write_patch"));
+  assert.ok(result.steps.some((step) => step.step.tool_name === "workspace.apply_patch"));
 
   const resume = await orchestrator.resumeApproval({
     approval_id: approval.id,
@@ -126,6 +127,11 @@ test("coding task with explicit target path requests approval for apply step and
   const readme = await readFile(path.join(workspaceRoot, "README.md"), "utf8");
   assert.match(readme, /PAOS Approved Change Note/);
   assert.match(readme, /README\.md 파일에서 로그인 오류 수정 방향을 정리해줘/);
+
+  const patch = await readFile(path.join(workspaceRoot, `docs/agent-drafts/${result.task.id}.patch`), "utf8");
+  assert.match(patch, /--- a\/README\.md/);
+  assert.match(patch, /\+\+ b\/README\.md/);
+  assert.match(patch, /\+## PAOS Approved Change Note/);
 });
 
 test("event stream includes task.created, plan.drafted, action.started, action.succeeded", async (t) => {

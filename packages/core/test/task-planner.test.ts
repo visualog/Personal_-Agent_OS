@@ -109,9 +109,11 @@ test("createPlan for coding request with explicit file path adds approval-gated 
       "workspace.list_files",
       "workspace.read_file",
       "workspace.write_draft",
-      "workspace.apply_file_edit",
+      "workspace.write_patch",
+      "workspace.apply_patch",
     ],
   );
   assert.equal(result.event.payload.requires_approval, true);
   assert.deepEqual(result.plan.steps[3]?.depends_on, [result.plan.steps[2]!.id]);
+  assert.deepEqual(result.plan.steps[4]?.depends_on, [result.plan.steps[3]!.id]);
 });

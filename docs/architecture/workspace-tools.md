@@ -1,9 +1,9 @@
-# Workspace Read-Only Tools
+# Workspace Tools
 
 상태: Draft v0.1  
 최종 갱신: 2026-04-22
 
-이 문서는 Personal Agent OS에서 워크스페이스를 읽기 전용으로 탐색하는 도구 계약을 정의한다.  
+이 문서는 Personal Agent OS에서 워크스페이스를 탐색하고, 승인된 범위 안에서 patch 제안을 생성/적용하는 도구 계약을 정의한다.  
 이 단계는 브라우저 프리뷰나 UI 렌더링이 아니라, 로컬 워크스페이스 파일 시스템을 안전하게 조회하는 런타임 문서다.
 
 ## 1. 목적
@@ -12,11 +12,11 @@
 
 핵심 원칙:
 
-- 읽기 전용이다.
+- 기본은 읽기 중심이다.
 - 파일 시스템 외부로 나가지 않는다.
 - 사용자 워크스페이스의 범위를 넘는 탐색을 허용하지 않는다.
-- UI, 브라우저, 미리보기, 자동 실행은 포함하지 않는다.
-- 결과는 후속 추론의 입력이지, 편집 권한이 아니다.
+- 위험한 쓰기 동작은 approval gate를 통과해야 한다.
+- patch 제안 생성과 실제 적용은 별도 도구로 분리한다.
 
 ## 2. 범위 규칙
 
@@ -28,7 +28,9 @@
 
 제한 규칙:
 
-- 도구는 삭제, 수정, 이동, 생성, 실행을 하지 않는다.
+- 도구는 삭제, 이동, 실행을 하지 않는다.
+- `docs/agent-drafts/` 아래 proposal 파일 생성은 low risk로 허용할 수 있다.
+- 실제 workspace 파일 적용은 high risk이며 승인 전에는 실행하지 않는다.
 - 심볼릭 링크는 정책상 안전성이 확인된 경우에만 따라간다.
 - 절대 경로가 주어지더라도 워크스페이스 루트 밖이면 거부한다.
 - 대용량 바이너리 파일은 일반 텍스트로 읽지 않는다.
@@ -142,6 +144,32 @@
 - 너무 큰 파일은 분할 읽기 또는 `truncated=true`로 응답한다.
 - 바이너리 감지 시 읽기 실패로 처리한다.
 
+### `workspace.write_draft`
+
+코딩 요청에 대한 안전한 초안 문서를 `docs/agent-drafts/` 아래에 생성한다.
+
+- 위험도: `low`
+- 승인 필요: 없음
+- 허용 경로: `docs/agent-drafts/` 내부
+
+### `workspace.write_patch`
+
+실제 파일 수정 전에 검토 가능한 patch 제안 파일을 `docs/agent-drafts/<task-id>.patch`로 생성한다.
+
+- 위험도: `low`
+- 승인 필요: 없음
+- 허용 경로: `docs/agent-drafts/` 내부
+- 실제 대상 파일은 수정하지 않는다.
+
+### `workspace.apply_patch`
+
+승인된 patch를 대상 workspace 파일에 적용한다.
+
+- 위험도: `high`
+- 승인 필요: 있음
+- 현재 구현은 append-only patch 적용만 지원한다.
+- 추후 semantic diff 적용기로 확장할 수 있다.
+
 ## 5. 위험과 역량
 
 역량:
@@ -212,10 +240,12 @@
 - `workspace.read_file`이 바이너리 파일을 거부한다.
 - `workspace.read_file`이 존재하지 않는 경로에 대해 `not_found`를 반환한다.
 - `workspace.read_file`이 무시 디렉터리 안 파일에 대해 `ignored_path`를 반환한다.
-- 두 도구 모두 UI 미리보기나 브라우저 렌더링 단계 없이 동작해야 한다.
+- `workspace.write_draft`와 `workspace.write_patch`는 `docs/agent-drafts/` 밖으로 쓰지 못한다.
+- `workspace.apply_patch`는 승인 없이 실행되지 않아야 한다.
+- `workspace.apply_patch`는 현재 append-only 동작으로 제한된다.
 
 ## 8. 구현 메모
 
-- 이 문서는 읽기 전용 워크스페이스 도구 계약만 다룬다.
-- 편집 도구, 적용 도구, diff 도구는 별도 문서로 분리한다.
+- 실제 소스 변경은 `workspace.write_patch`로 제안 파일을 만든 뒤 `workspace.apply_patch` 승인 흐름을 통해서만 적용한다.
+- 이 단계는 아직 완전한 semantic patch engine이 아니라, 승인된 append patch를 적용하는 첫 안전한 구현이다.
 - 브라우저 기반 미리보기, 화면 캡처, 시각적 검사 기능은 이 단계의 범위 밖이다.

@@ -11,6 +11,7 @@ import {
   readWorkspaceFile,
   resolveWorkspacePath,
   writeWorkspaceFile,
+  applyWorkspacePatch,
 } from "../src/index.js";
 
 async function createTempWorkspace(): Promise<string> {
@@ -79,6 +80,27 @@ test("writeWorkspaceFile supports append mode for approved edits", async (t) => 
   assert.match(updated, /second line/);
 });
 
+test("applyWorkspacePatch appends approved patch content and reports patch metadata", async (t) => {
+  const root = await createTempWorkspace();
+  t.after(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const result = await applyWorkspacePatch({
+    root,
+    path: "root.txt",
+    patch: "--- a/root.txt\n+++ b/root.txt\n@@\n+approved patch line\n",
+    append_content: "approved patch line",
+  });
+
+  assert.equal(result.path, "root.txt");
+  assert.ok(result.patch_bytes > 0);
+  assert.ok(result.bytes_appended > 0);
+
+  const updated = await readWorkspaceFile({ root }, "root.txt");
+  assert.match(updated, /approved patch line/);
+});
+
 test("createWorkspaceToolGatewayTools registers with InMemoryToolGateway and succeeds for workspace.read capability", async (t) => {
   const root = await createTempWorkspace();
   t.after(async () => {
@@ -137,7 +159,7 @@ test("gateway denies read tool if workspace.read capability missing", async (t) 
   assert.equal(result.status, "denied");
 });
 
-test("draft and apply edit tools register and enforce their input constraints", async (t) => {
+test("draft, patch proposal, and apply patch tools register and enforce their input constraints", async (t) => {
   const root = await createTempWorkspace();
   t.after(async () => {
     await rm(root, { recursive: true, force: true });
@@ -165,14 +187,29 @@ test("draft and apply edit tools register and enforce their input constraints", 
 
   assert.equal(draftResult.status, "succeeded");
 
-  const applyResult = await gateway.execute({
+  const patchResult = await gateway.execute({
     action_id: "action_04",
     step_id: "step_04",
-    tool_name: "workspace.apply_file_edit",
+    tool_name: "workspace.write_patch",
+    input: {
+      path: "docs/agent-drafts/proposal.patch",
+      content: "--- a/root.txt\n+++ b/root.txt\n@@\n+approved line\n",
+    },
+    granted_capabilities: ["workspace.write"],
+    scope_allowed: true,
+    sandbox_matched: true,
+  });
+
+  assert.equal(patchResult.status, "succeeded");
+
+  const applyResult = await gateway.execute({
+    action_id: "action_05",
+    step_id: "step_05",
+    tool_name: "workspace.apply_patch",
     input: {
       path: "root.txt",
-      content: "approved line",
-      mode: "append",
+      patch: "--- a/root.txt\n+++ b/root.txt\n@@\n+approved line\n",
+      append_content: "approved line",
     },
     granted_capabilities: ["workspace.write"],
     scope_allowed: true,
