@@ -18,6 +18,7 @@
 - [Telegram Bridge](architecture/telegram-bridge.md): Telegram long polling 기반 로컬 원격 제어 브리지
 - [Slack Bridge](architecture/slack-bridge.md): Slack polling 기반 로컬 원격 제어 브리지
 - [Agent Daemon](architecture/agent-daemon.md): 항상 켜진 로컬 agent HTTP daemon
+- [Local Service](architecture/local-service.md): macOS launchd 기반 자동 실행/재시작
 - `apps/web`: 첫 번째 Command Center 웹 프로토타입
 - [Policy and Permissions](security/policy-and-permissions.md): 위험도, capability, 승인 정책
 - [Policy Engine Runtime](security/policy-engine-runtime.md): `evaluatePolicy` 입력과 판정 규칙

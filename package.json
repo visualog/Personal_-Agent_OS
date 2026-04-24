@@ -10,13 +10,16 @@
     "start:agent-daemon": "node --import tsx scripts/run-agent-daemon.ts",
     "start:slack-bridge": "node --import tsx scripts/run-slack-bridge.ts",
     "start:telegram-bridge": "node --import tsx scripts/run-telegram-bridge.ts",
+    "service:install": "node --import tsx scripts/manage-launch-agents.ts install",
+    "service:uninstall": "node --import tsx scripts/manage-launch-agents.ts uninstall",
+    "service:status": "node --import tsx scripts/manage-launch-agents.ts status",
     "build": "tsc -p tsconfig.json",
     "prebuild:web": "npm run generate:web-demo",
     "build:web": "vite build",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "node --test --import tsx packages/core/test/*.test.ts",
     "test:ui": "node --test --test-concurrency=1 --import tsx tests/ui/*.test.ts",
-    "test:daemon": "node --test --import tsx tests/agent-daemon.test.ts",
+    "test:daemon": "node --test --import tsx tests/*.test.ts",
     "test:mvp": "npm test && npm run test:ui"
   },
   "devDependencies": {

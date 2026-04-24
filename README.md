@@ -64,6 +64,14 @@ The local agent can also run as a standalone daemon instead of depending on the 
 - default remote command endpoint: `POST /api/remote/commands`
 - Telegram bridge can target it with `PAOS_AGENT_DAEMON_URL=http://127.0.0.1:4180`
 
+For day-to-day use on macOS, install the daemon and Slack bridge as launchd user services:
+
+- `npm run service:install`
+- `npm run service:status`
+- `npm run service:uninstall`
+
+The services load secrets from local `.env` and write logs to `.paos/logs`.
+
 You can start from the included environment template:
 
 - `.env.example`
