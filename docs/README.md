@@ -5,6 +5,7 @@
 ## 시작점
 
 - [MVP Issue Plan](plans/2026-04-21-personal-agent-os-mvp-issue-plan.md): 첫 번째 기준 문서
+- [Current Handoff](handoff/2026-04-24-personal-agent-os-handoff.md): 현재 Slack/daemon 기반 로컬 에이전트 상태와 다음 작업
 - [Domain Model](architecture/domain-model.md): 핵심 도메인 객체와 상태 전이
 - [Glossary](architecture/glossary.md): 구현과 이슈 작성에 쓰는 공통 용어
 - [Events](architecture/events.md): 내부 이벤트 계약과 payload 기준
